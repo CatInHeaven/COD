@@ -105,8 +105,7 @@ typedef struct ISLPROBS {
 	////struct ISLPROBS* next;
 }ISLPROBS;
 
-typedef struct DEROBS
-{
+typedef struct DEROBS {
 	EDGE_STRUCT;
 	short Scid1;       // 自主导航卫星SCID与PRN号
 	short Scid2;       // 作为基准的参考卫星SCID与PRN号
@@ -164,7 +163,7 @@ void DectectDerObsOutlier(SATNET* SatNet);
 int ScalarTimeMeasUpdate(double O_C, double sigma2, double H[], int Scale, CONSTSTATE* AllSatCov);
 int CompVectStat(const int n, const double Dat[], double* Mean, double* Std, SATINFO* SatAtod);
 void ClkMeasUpdate(SATNET* SatNet);
-ScalarOrbitMeasUpdate(double O_C, double sigma2, double H[], int Scale, CONSTSTATE* AllSatCov);
+int ScalarOrbitMeasUpdate(double O_C, double sigma2, double H[], int Scale, CONSTSTATE* AllSatCov);
 void ANSMeasUpdate(SATNET* SatNet);
 void OutputSatOrbit(SATINFO* SatAtod);
 

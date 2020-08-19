@@ -4,8 +4,6 @@
 #include <math.h>
 #include "main.h"
 
-
-
 FILE* FDerOrb, * FDerClk, * FPProc, * FPLOG, * FDerMAO;
 FILE* Fres;
 GPSTIME    FrameTime;
@@ -85,7 +83,7 @@ int init() {
 	// read satllite information
 
 	char FName[256] = { 0 };
-	sprintf(FName, "../../data/input/SATELLIT-BDS.I05\0");
+	sprintf(FName, "../../data/input/SATELLIT-BDS.I05");
 	FILE* Frin;
 	char Line[512];
 	SATINFO* Info;
@@ -128,7 +126,7 @@ int init() {
 
 	//TODO: other information initialization
 	//initialize clk and X[6]
-	sprintf(FName, "../../data/input/InitState0629000000.txt\0");
+	sprintf(FName, "../../data/input/InitState0629000000.txt");
 	if ((Frin = fopen(FName, "rt")) == NULL)
 	{
 		return -1;
@@ -211,8 +209,8 @@ int init() {
 	// read simulate data (small dataset)
 	if ((SimData = (ISLPROBS*)malloc(sizeof(ISLPROBS))) == NULL) return -1;
 	if ((EpkISLObs = (ISLPROBS*)malloc(sizeof(ISLPROBS))) == NULL) return -1;
-	list_init(SimData);
-	list_init(EpkISLObs);
+	list_init((list*)SimData);
+	list_init((list*)EpkISLObs);
 	if (ReadSimObsData(&FrameTime, SimData) < 0) return -1;
 
 	return 0;
@@ -296,105 +294,6 @@ void run() {
 	printf("_______________end_______________\n");
 }
 
-int ClockOffsetFitting(TIMESYC* SatClk, GPSTIME* TOC, double Clk[3])
-{
-	int i, sum;
-	double A[MAXCLKSER * 3], B[MAXCLKSER];
-	double AT[MAXCLKSER * 3], ATA[9], ATB[3], ATA_[9];
-	double dt, sigma;
-
-	if (SatClk->TotalNum >= MAXCLKSER)
-		sum = MAXCLKSER;
-	else
-		sum = SatClk->TotalNum;
-
-
-	if (sum < 10)
-		return false;
-
-
-	for (i = 0; i < sum; i++) {
-		dt = GetDifGPSTime(SatClk->Time + i, TOC) / SECPERDAY;
-		A[3 * i] = AT[i] = 1.0;
-		A[3 * i + 1] = AT[sum + i] = dt;
-		A[3 * i + 2] = AT[2 * sum + i] = dt * dt;
-		B[i] = SatClk->ClkSeq[i];
-	}
-
-	MatrixMultiply(3, sum, sum, 3, AT, A, ATA);
-	MatrixMultiply(3, sum, sum, 1, AT, B, ATB);
-	MatrixInv(3, ATA, ATA_);
-	MatrixMultiply(3, 3, 3, 1, ATA_, ATB, Clk);
-
-	sigma = 0.0;
-	for (i = 0; i < sum; i++) {
-		B[i] = B[i] - Clk[0] - A[3 * i + 1] * Clk[1] - A[3 * i + 2] * Clk[2];
-		sigma = sigma + B[i] * B[i];
-	}
-
-	sigma = sigma / (sum - 1);
-
-	return true;
-}
-
-double EphPredictTime = 0;
-void OutputSatOrbit(SATINFO* SatAtod) {
-	MJDTIME Mjd;
-	double dt, XECF[6], XECI[6];      // output ECF, to test EOP predictions
-	double Ceof[3];
-	GPSTIME T;
-	double Clk;
-
-	dt = SECPERHOUR * EphPredictTime;
-	T = SatAtod->TOE;
-	T.SecOfWeek += dt;
-	CheckGPSTime(&T);
-
-	if (SatAtod->Valid < BREAKING)    return;
-
-	GPSTimeToMJDTime(&T, &Mjd);
-
-	if (!Fres)
-	{
-		printf("AutoNave result file cannot be opened!\n");
-		return;
-	}
-	else
-	{
-		if (fabs(dt) < 1.0E-8)
-		{
-			Clk = SatAtod->Clk[0];
-			CopyArray(6, XECI, SatAtod->X);
-		}
-		else
-		{
-			if (ClockOffsetFitting(&SatAtod->SatClk, &SatAtod->TOE, Ceof) == false)
-			{
-				Ceof[0] = SatAtod->Clk[0];
-				Ceof[1] = SatAtod->Clk[1];
-				Clk = Ceof[0] + Ceof[1] * dt;
-			}
-			else
-			{
-				Clk = Ceof[0] + Ceof[1] * dt / SECPERDAY + Ceof[2] * pow(dt / SECPERDAY, 2.0);
-			}
-
-			CopyArray(6, XECI, SatAtod->X);
-			OrbitIntegToGivenTime(&SatAtod->TOE, &T, 120.0, XECI);
-		}
-
-		ICRF_ITRF_GPST(MJD_J2000, &T, 1, XECI, XECF);
-
-		fprintf(Fres, "%12.5lf %3d %2d %14.3lf %14.3lf %14.3lf %14.5lf %14.5lf %14.5lf %14.3lf %14.3lf %14.3lf %14.5lf %14.5lf %14.5lf %14.6lf %17.8lf %4d %4d %10.3lf %4d %10.1lf %6.1lf %6.1lf %6.1lf %10.3lf %10.3lf %10.3lf %10.3lf %10.3lf %10.3lf %10.3lf %10.3lf %10.3lf\n",
-			Mjd.Days + Mjd.FracDay, SatAtod->id, SatAtod->Valid, XECF[0], XECF[1], XECF[2], XECF[3], XECF[4], XECF[5],
-			XECI[0], XECI[1], XECI[2], XECI[3], XECI[4], XECI[5], Clk * 1E6, SatAtod->Clk[1] * 1E9,
-			SatAtod->edges_num, SatAtod->edges_num, SatAtod->PDOP, T.Week, T.SecOfWeek,
-			sqrt(SatAtod->CovX[0]), sqrt(SatAtod->CovX[7]), sqrt(SatAtod->CovX[14]), SatAtod->URA,
-			SatAtod->MeanClk_apr, SatAtod->StdClk_apr, SatAtod->MeanClk_pst, SatAtod->StdClk_pst,
-			SatAtod->MeanOrb_apr, SatAtod->StdOrb_apr, SatAtod->MeanOrb_pst, SatAtod->StdOrb_pst);
-	}
-}
-
 int ReadSimObsData(GPSTIME* Time, ISLPROBS* islist) {
 	char Line[1024];
 	char DatFileName[256];
@@ -423,22 +322,21 @@ int ReadSimObsData(GPSTIME* Time, ISLPROBS* islist) {
 			&rpv[0], &rpv[1], &rpv[2], &rpv[3], &rpv[4], &rpv[5]) < 16)  continue;
 
 		obs->TrAnt = obs->RvAnt = 1;
-		if (obs->TrScid == 76)    obs->TrAnt = 6;
-		if (obs->RvScid == 76)    obs->RvAnt = 6;
-		if (obs->RvScid == 76) {
-			ICRF_ITRF_GPST(MJD_J2000, &obs->RvLocTime, 0, rpv, Anchor[0].Pos);
-		}
 		if (obs->TrScid == 76) {
+			obs->TrAnt = 6;
 			ICRF_ITRF_GPST(MJD_J2000, &obs->RvLocTime, 0, tpv, Anchor[0].Pos);
 		}
-		obs->PRObs = GetPseudoRange(obs->TrScid, obs->RvLocTime.Week, obs->RvLocTime.SecOfWeek, rpv, tpv);
-		//fprintf(FDerMAO, "MAO position: %12.5f %10.4lf %10.4lf %10.4lf %10.4lf %10.4lf %10.4lf\n", obs.RvLocTime.SecOfWeek, rpv[0], rpv[1], rpv[2], rpv[3], rpv[4], rpv[5]);
+		if (obs->RvScid == 76) {
+			obs->RvAnt = 6;
+			ICRF_ITRF_GPST(MJD_J2000, &obs->RvLocTime, 0, rpv, Anchor[0].Pos);
+		}
 
-		//obs->Quality = 0;
+		obs->PRObs = GetPseudoRange(obs->TrScid, obs->RvLocTime.Week, obs->RvLocTime.SecOfWeek, rpv, tpv);
+
 		obs->Valid = true;
 		for (int i = 0; i < 10; i++)  *(obs->Corr + i) = 0.0;
 		if (obs->TrScid != 0 && obs->RvScid != 0 && fabs(obs->PRObs) > 0.1)
-			list_append(islist, (node_t*)obs);
+			list_append((list*)islist, (node_t*)obs);
 	}
 	return 0;
 }
@@ -2652,4 +2550,103 @@ int ScalarOrbitMeasUpdate(double O_C, double sigma2, double H[], int Scale, CONS
 	CopyArray((SatNum * DIM) * (SatNum * DIM), AllSatCov->OrbCov, Cov);
 
 	return true;
+}
+
+int ClockOffsetFitting(TIMESYC* SatClk, GPSTIME* TOC, double Clk[3])
+{
+	int i, sum;
+	double A[MAXCLKSER * 3], B[MAXCLKSER];
+	double AT[MAXCLKSER * 3], ATA[9], ATB[3], ATA_[9];
+	double dt, sigma;
+
+	if (SatClk->TotalNum >= MAXCLKSER)
+		sum = MAXCLKSER;
+	else
+		sum = SatClk->TotalNum;
+
+
+	if (sum < 10)
+		return false;
+
+
+	for (i = 0; i < sum; i++) {
+		dt = GetDifGPSTime(SatClk->Time + i, TOC) / SECPERDAY;
+		A[3 * i] = AT[i] = 1.0;
+		A[3 * i + 1] = AT[sum + i] = dt;
+		A[3 * i + 2] = AT[2 * sum + i] = dt * dt;
+		B[i] = SatClk->ClkSeq[i];
+	}
+
+	MatrixMultiply(3, sum, sum, 3, AT, A, ATA);
+	MatrixMultiply(3, sum, sum, 1, AT, B, ATB);
+	MatrixInv(3, ATA, ATA_);
+	MatrixMultiply(3, 3, 3, 1, ATA_, ATB, Clk);
+
+	sigma = 0.0;
+	for (i = 0; i < sum; i++) {
+		B[i] = B[i] - Clk[0] - A[3 * i + 1] * Clk[1] - A[3 * i + 2] * Clk[2];
+		sigma = sigma + B[i] * B[i];
+	}
+
+	sigma = sigma / (sum - 1);
+
+	return true;
+}
+
+double EphPredictTime = 0;
+void OutputSatOrbit(SATINFO* SatAtod) {
+	MJDTIME Mjd;
+	double dt, XECF[6], XECI[6];      // output ECF, to test EOP predictions
+	double Ceof[3];
+	GPSTIME T;
+	double Clk;
+
+	dt = SECPERHOUR * EphPredictTime;
+	T = SatAtod->TOE;
+	T.SecOfWeek += dt;
+	CheckGPSTime(&T);
+
+	if (SatAtod->Valid < BREAKING)    return;
+
+	GPSTimeToMJDTime(&T, &Mjd);
+
+	if (!Fres)
+	{
+		printf("AutoNave result file cannot be opened!\n");
+		return;
+	}
+	else
+	{
+		if (fabs(dt) < 1.0E-8)
+		{
+			Clk = SatAtod->Clk[0];
+			CopyArray(6, XECI, SatAtod->X);
+		}
+		else
+		{
+			if (ClockOffsetFitting(&SatAtod->SatClk, &SatAtod->TOE, Ceof) == false)
+			{
+				Ceof[0] = SatAtod->Clk[0];
+				Ceof[1] = SatAtod->Clk[1];
+				Clk = Ceof[0] + Ceof[1] * dt;
+			}
+			else
+			{
+				Clk = Ceof[0] + Ceof[1] * dt / SECPERDAY + Ceof[2] * pow(dt / SECPERDAY, 2.0);
+			}
+
+			CopyArray(6, XECI, SatAtod->X);
+			OrbitIntegToGivenTime(&SatAtod->TOE, &T, 120.0, XECI);
+		}
+
+		ICRF_ITRF_GPST(MJD_J2000, &T, 1, XECI, XECF);
+
+		fprintf(Fres, "%12.5lf %3d %2d %14.3lf %14.3lf %14.3lf %14.5lf %14.5lf %14.5lf %14.3lf %14.3lf %14.3lf %14.5lf %14.5lf %14.5lf %14.6lf %17.8lf %4d %4d %10.3lf %4d %10.1lf %6.1lf %6.1lf %6.1lf %10.3lf %10.3lf %10.3lf %10.3lf %10.3lf %10.3lf %10.3lf %10.3lf %10.3lf\n",
+			Mjd.Days + Mjd.FracDay, SatAtod->id, SatAtod->Valid, XECF[0], XECF[1], XECF[2], XECF[3], XECF[4], XECF[5],
+			XECI[0], XECI[1], XECI[2], XECI[3], XECI[4], XECI[5], Clk * 1E6, SatAtod->Clk[1] * 1E9,
+			SatAtod->edges_num, SatAtod->edges_num, SatAtod->PDOP, T.Week, T.SecOfWeek,
+			sqrt(SatAtod->CovX[0]), sqrt(SatAtod->CovX[7]), sqrt(SatAtod->CovX[14]), SatAtod->URA,
+			SatAtod->MeanClk_apr, SatAtod->StdClk_apr, SatAtod->MeanClk_pst, SatAtod->StdClk_pst,
+			SatAtod->MeanOrb_apr, SatAtod->StdOrb_apr, SatAtod->MeanOrb_pst, SatAtod->StdOrb_pst);
+	}
 }
