@@ -1,23 +1,23 @@
-cod:main.o RefSys.o GPSTime.o matrix.o util.o
+CC = gcc
 
-	gcc -o cod main.o RefSys.o GPSTime.o matrix.o util.o -lm
+objects = main.o RefSys.o GPSTime.o matrix.o util.o
+TARGET := cod
 
-main.o:main.c main.h
+$(TARGET):$(objects)
 
-	gcc -c main.c
+	$(CC) -o $(TARGET) $(objects) -lm
 
-RefSys.o:RefSys.c RefSys.h
-	gcc -c RefSys.c
+main.o:main.h
 
-GPSTime.o:GPSTime.c GPSTime.h
-	gcc -c GPSTime.c
+RefSys.o:RefSys.h
 
-matrix.o:matrix.c matrix.h
-	gcc -c matrix.c
+GPSTime.o:GPSTime.h
 
-util.o:util.c util.h
-	gcc -c util.c
+matrix.o:matrix.h
 
+util.o:util.h
+
+.PHONY : clean
 clean:
 
-	rm cod main.o RefSys.o GPSTime.o matrix.o util.o
+	-rm $(TARGET) $(objects)
