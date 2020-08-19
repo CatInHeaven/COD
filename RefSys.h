@@ -6,20 +6,20 @@
 #define TT_TAI   32.184
 #define BDT_TAI -33.0
 #define Omega_BDS 7.2921150e-5      /* [rad/s], the earth rotation rate */
-#define EOPDataFileName "../data/input/eop_multi.txt"
+#define EOPDataFileName "../../data/input/eop_multi.txt"
 
 #define pi 3.1415926535897932384626433832795
 #define Rad (pi/180.0)                  /* Radians per degree */
 #define Arcs (3600.0*180.0/pi)          /* Arcseconds per radian */
 
-/* ������ת�����ṹ�嶨�� */
+/* 地球自转参数结构体定义 */
 typedef struct EOPPARA
 {
-	double Mjd;          /* �������� */
-	double x;            /* ���Ʋ���x[����] */
-	double y;            /* ���Ʋ���y[����] */
+	double Mjd;          /* 简化儒略日 */
+	double x;            /* 极移参数x[角秒] */
+	double y;            /* 极移参数y[角秒] */
 	double dUT1;         /* UT1-UTC [s]     */
-	char   Status;       /* ��ʼ����־ */
+	char   Status;       /* 初始化标志 */
 
 }EOPPARA;
 

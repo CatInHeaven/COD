@@ -8,17 +8,14 @@
 
 FILE* FDerOrb, * FDerClk, * FPProc, * FPLOG, * FDerMAO;
 FILE* Fres;
-GPSTIME    FrameTime;             // ��ǰ��������BDT
+GPSTIME    FrameTime;
 // configural iformation
-int        SatNum;                   // ʹ�õ�������
+int        SatNum;
 int		AncNum = 1;
-//int        SatPrn[MAXSATNUM];        // �������ǵ�PRN��
-SATINDEX        SatID[MAXSATNUM][2] = { {19,},{20,},{21,},{22,},{23,},{24,},{25,},{26,},{27,},{28,},{29,},{30,},{36,},{37,},{38,},{39,},{40,},{41,},{42,},{43,},{44,},{45,},{46,},{47,} };         // �������ǵ�SCID��, ��״̬�����洢λ�����
-double     PosAccu, VelAccu;         // ��ʼ��ʱλ�����ٶȾ���
-//double     PSDofOK, PSDofBreak;      // ������������
-//double OrbDiff; //�㲥�����Ĺ�����ȣ�Ĭ��Ϊ2.5m,���ڴֲ�̽��
-//double ClkDiff; //�㲥�������Ӳ��, Ĭ��Ϊ3ns(2.1m),���ڴֲ�̽��
-//double h[3];		//�Ӳ�Ĺ�����������
+
+SATINDEX        SatID[MAXSATNUM][2] = { {19,},{20,},{21,},{22,},{23,},{24,},{25,},{26,},{27,},{28,},{29,},{30,},{36,},{37,},{38,},{39,},{40,},{41,},{42,},{43,},{44,},{45,},{46,},{47,} };
+double     PosAccu, VelAccu;         
+
 double StepOfAutoNav = 300;
 double NoiseOfISL = 5.0;
 double OrbDiff = 100;
@@ -45,7 +42,7 @@ int main() {
 		printf("%4d %10.1f\n", FrameTime.Week, FrameTime.SecOfWeek);
 		n++;
 	}
-	// TODO; memory free!
+	// TODO memory free!
 	graph_destroy((Graph*)SatNet);
 	list_destroy((list*)SimData);
 	list_destroy((list*)EpkISLObs);
@@ -83,13 +80,12 @@ int init() {
 	if ((EpkDerObs = (DEROBS*)malloc(sizeof(ISLPROBS))) == NULL) return -1;
 	SatNet->edges = (Edge*)EpkDerObs;
 	graph_init((Graph*)SatNet);
-	//TODO: initialize satellite network
 
 
 	// read satllite information
 
 	char FName[256] = { 0 };
-	sprintf(FName, "../data/input/SATELLIT-BDS.I05\0");
+	sprintf(FName, "../../data/input/SATELLIT-BDS.I05\0");
 	FILE* Frin;
 	char Line[512];
 	SATINFO* Info;
@@ -130,25 +126,9 @@ int init() {
 	}
 	fclose(Frin);
 
-	// initialize anchor station information
-	if ((Anchor = (ANCHSTN*)malloc(sizeof(ANCHSTN))) == NULL) return -1;
-	list_append((list*)SatNodes, (node_t*)Anchor);
-	Anchor[0].StnId = 76;
-	Anchor[0].type = 0;
-	Anchor[0].clk = 0.0;
-	Anchor[0].Pos[0] = -2003066.221396;
-	Anchor[0].Pos[1] = 5716340.837106;
-	Anchor[0].Pos[2] = 1991308.673030;
-	Anchor[0].Tgd[0] = 0.0;
-	Anchor[0].Tgd[1] = 0.0;
-	Anchor[0].RefClkFlag = 1;
-	Anchor[0].Valid = 0;
-
 	//TODO: other information initialization
-
-
 	//initialize clk and X[6]
-	sprintf(FName, "../data/input/InitState0629000000.txt\0");
+	sprintf(FName, "../../data/input/InitState0629000000.txt\0");
 	if ((Frin = fopen(FName, "rt")) == NULL)
 	{
 		return -1;
@@ -166,7 +146,7 @@ int init() {
 	double clk[2];
 	double SigmaPos, SigmaVel, SigmaClkoff, SigmaClkSht;
 
-	SigmaPos = PosAccu;                 // ��ʼЭ�������ýϴ󣬻�������
+	SigmaPos = PosAccu;
 	SigmaVel = VelAccu;
 	SigmaClkoff = PosAccu / C_Light;
 	SigmaClkSht = VelAccu / C_Light;
@@ -177,14 +157,8 @@ int init() {
 		fgets(Line, 512, Frin);
 		if (strncmp(Line, "EOF", 3) == 0)   break;
 
-		//if (sscanf(Line, "%*hd %*hd %hd %lf %lf %lf %lf %lf %lf %lf %lf %lf %*hd",
-		//	&toe.Week, &toe.SecOfWeek,
-		//	x, x + 1, x + 2, x + 3, x + 4, x + 5,
-		//	clk, clk + 1) != 10)  continue;
 		if (sscanf(Line, "%*hd %*hd %hd %lf %lf %lf %lf %lf %lf %lf %lf %lf %hd", &(p->TOE.Week), &(p->TOE.SecOfWeek), p->X, p->X + 1, p->X + 2, p->X + 3, p->X + 4, p->X + 5, p->Clk, p->Clk + 1, &(p->Health)) != 11)
 			continue;
-
-		// SetSatInitState(SatANS + n, &ST);
 
 		//initialize the covariance of clk and X
 		memset(p->CovC, 0, 4 * sizeof(double));
@@ -220,13 +194,26 @@ int init() {
 
 	fclose(Frin);
 
+	// initialize anchor station information
+	if ((Anchor = (ANCHSTN*)malloc(sizeof(ANCHSTN))) == NULL) return -1;
+	list_append((list*)SatNodes, (node_t*)Anchor);
+	Anchor[0].StnId = 76;
+	Anchor[0].type = 0;
+	Anchor[0].clk = 0.0;
+	Anchor[0].Pos[0] = -2003066.221396;
+	Anchor[0].Pos[1] = 5716340.837106;
+	Anchor[0].Pos[2] = 1991308.673030;
+	Anchor[0].Tgd[0] = 0.0;
+	Anchor[0].Tgd[1] = 0.0;
+	Anchor[0].RefClkFlag = 1;
+	Anchor[0].Valid = 0;
+
+	// read simulate data (small dataset)
 	if ((SimData = (ISLPROBS*)malloc(sizeof(ISLPROBS))) == NULL) return -1;
 	if ((EpkISLObs = (ISLPROBS*)malloc(sizeof(ISLPROBS))) == NULL) return -1;
 	list_init(SimData);
 	list_init(EpkISLObs);
-	// read simulate data (small dataset)
-	ReadSimObsData(&FrameTime, SimData);
-
+	if (ReadSimObsData(&FrameTime, SimData) < 0) return -1;
 
 	return 0;
 }
@@ -249,8 +236,7 @@ SATINFO* GetSatIndex(int SID) {
 	return sat;
 }
 
-int GetAnchorIndex(const short SId)
-{
+int GetAnchorIndex(const short SId) {
 	int i, RetVal;
 
 	RetVal = -1;
@@ -273,10 +259,9 @@ void run() {
 	NextFramTime.SecOfWeek = FrameTime.SecOfWeek + StepOfAutoNav;
 	CheckGPSTime(&NextFramTime);
 
-	//TODO: output files
+	// output files
 	if (fmod(NextFramTime.SecOfWeek + 0.001, SECPERDAY) < 0.5 || RunFlag == 0) {
-		//if (fmod(NextFramTime.SecOfWeek + 0.001, SECPERDAY) < 0.5) {
-			//�򿪵�����ļ������
+
 		OpenANSResFileDaily(&NextFramTime);
 	}
 	// add link to Satellite Network
@@ -286,21 +271,20 @@ void run() {
 	GenDerPrObs(EpkISLObs, SatNet);
 
 	printf("开始进行数据预处理\n");
-	//GenDerObsPredict(SatNet); //�Ե����Ĺ۲�ֵ����Ԥ����
-	DectectDerObsOutlier(SatNet);  //�ֲ��ж�
+	DectectDerObsOutlier(SatNet);
 	printf("数据预处理结束\n");
 
 	printf("开始进行钟差测量更新\n");
-	ClkMeasUpdate(SatNet);   //�Ӳ����
+	ClkMeasUpdate(SatNet);
 	printf("完成钟差测量更新\n");
 
 	printf("开始进行钟轨道测量更新\n");
-	ANSMeasUpdate(SatNet);   //�������
+	ANSMeasUpdate(SatNet);
 	printf("完成轨道测量更新\n");
 
 	SATINFO* sat;
 	sat = (SATINFO*)SatNet->points;
-	for (i = 0; i < SatNum; i++) {                 //������
+	for (i = 0; i < SatNum; i++) {
 		sat = (SATINFO*)sat->next;
 		if (sat->Valid <= NOINIT)   continue;
 		OutputSatOrbit(sat);
@@ -308,7 +292,7 @@ void run() {
 
 	FrameTime.Week = NextFramTime.Week;
 	FrameTime.SecOfWeek = NextFramTime.SecOfWeek;
-	RunFlag = 1;//���ǵ�һ��ִ��
+	RunFlag = 1;
 	printf("_______________end_______________\n");
 }
 
@@ -320,21 +304,16 @@ int ClockOffsetFitting(TIMESYC* SatClk, GPSTIME* TOC, double Clk[3])
 	double dt, sigma;
 
 	if (SatClk->TotalNum >= MAXCLKSER)
-	{
 		sum = MAXCLKSER;
-	}
 	else
-	{
 		sum = SatClk->TotalNum;
-	}
+
 
 	if (sum < 10)
-	{
-		return false;    // ����3���Ӳ����в���ϸ���
-	}
+		return false;
 
-	for (i = 0; i < sum; i++)
-	{
+
+	for (i = 0; i < sum; i++) {
 		dt = GetDifGPSTime(SatClk->Time + i, TOC) / SECPERDAY;
 		A[3 * i] = AT[i] = 1.0;
 		A[3 * i + 1] = AT[sum + i] = dt;
@@ -348,8 +327,7 @@ int ClockOffsetFitting(TIMESYC* SatClk, GPSTIME* TOC, double Clk[3])
 	MatrixMultiply(3, 3, 3, 1, ATA_, ATB, Clk);
 
 	sigma = 0.0;
-	for (i = 0; i < sum; i++)
-	{
+	for (i = 0; i < sum; i++) {
 		B[i] = B[i] - Clk[0] - A[3 * i + 1] * Clk[1] - A[3 * i + 2] * Clk[2];
 		sigma = sigma + B[i] * B[i];
 	}
@@ -364,7 +342,7 @@ void OutputSatOrbit(SATINFO* SatAtod) {
 	MJDTIME Mjd;
 	double dt, XECF[6], XECI[6];      // output ECF, to test EOP predictions
 	double Ceof[3];
-	GPSTIME T;    // ���Ԥ��2Сʱ�Ĺ�����Ӳ���
+	GPSTIME T;
 	double Clk;
 
 	dt = SECPERHOUR * EphPredictTime;
@@ -444,7 +422,6 @@ int ReadSimObsData(GPSTIME* Time, ISLPROBS* islist) {
 			&tpv[0], &tpv[1], &tpv[2], &tpv[3], &tpv[4], &tpv[5],
 			&rpv[0], &rpv[1], &rpv[2], &rpv[3], &rpv[4], &rpv[5]) < 16)  continue;
 
-		//����ֵ
 		obs->TrAnt = obs->RvAnt = 1;
 		if (obs->TrScid == 76)    obs->TrAnt = 6;
 		if (obs->RvScid == 76)    obs->RvAnt = 6;
@@ -467,7 +444,7 @@ int ReadSimObsData(GPSTIME* Time, ISLPROBS* islist) {
 }
 
 
-#define GM_D 4									// ������ģ�͵Ľ״�
+#define GM_D 4
 #define GM_Earth   398600.4415e+9     /* [m^3/s^2]; JGM3  */
 #define R_Earth    6378136.3          /* Radius Earth [m]; JGM3  */
 static double EGM2008[12 + 1][12 + 1] = {   //EGM2008 12*12    non-normalization coefficients
@@ -629,9 +606,9 @@ void AccelHarmonic(const double Pos[], const double E[9], double Acc[3],
 	MatrixTranspose(3, 3, E, ET);
 	MatrixMultiply(3, 3, 3, 1, ET, a_bf, Acc);
 
-	if (HasPDev == true)       /* ��������������C20�������ƫ���� */
+	if (HasPDev == true) 
 	{
-		double  GM_R3, GM_r5;           /* ��������  */
+		double  GM_R3, GM_r5;
 		double  dadr_ef[9], Temp[9];
 
 		C = EGM2008[2][0];                 // only J2
@@ -679,7 +656,7 @@ void RK4Step(MJDTIME* Mjd_GPS, double step, double Y0[6])
 {
 	int i;
 	double Y[6], dY[4][6];
-	double h = step / SECPERDAY; //?????????????????
+	double h = step / SECPERDAY; 
 
 	CopyArray(6, Y, Y0);
 	Accel(Mjd_GPS, Y, dY[0]);
@@ -704,9 +681,9 @@ void RK4Step(MJDTIME* Mjd_GPS, double step, double Y0[6])
 		Y[i] = Y0[i] + dY[2][i] * step;
 	}
 	Accel(Mjd_GPS, Y, dY[3]);    /* 4th time */
-	/*  ���ֽ��  */
 
-	if (Mjd_GPS->FracDay >= 1.0)    /*  ������ */
+
+	if (Mjd_GPS->FracDay >= 1.0)
 	{
 		Mjd_GPS->FracDay -= 1.0;
 		Mjd_GPS->Days += 1;
@@ -722,8 +699,8 @@ void OrbitIntegToGivenTime(const GPSTIME* BegGPS, const GPSTIME* GivenTime, cons
 	double Y0[])
 {
 	short   sign;
-	double  Step;              /* ���ֲ���[s] */
-	double  dT;                /*��һʱ���뵱ǰʱ���ʱ������s�� */
+	double  Step;              
+	double  dT;                
 
 	MJDTIME Mjd_GPS0, Mjd_GivenTime;
 	GPSTimeToMJDTime(BegGPS, &Mjd_GPS0);
@@ -732,13 +709,13 @@ void OrbitIntegToGivenTime(const GPSTIME* BegGPS, const GPSTIME* GivenTime, cons
 	dT = GetDifGPSTime(GivenTime, BegGPS);
 
 	if (dT >= 0.0)
-		sign = 1;        // ��ǰ����
+		sign = 1;       
 	else
 		sign = -1;
 
 	do {
 		if (fabs(dT) > Pace)
-			Step = Pace * sign;    /*  ���û��ֲ��� */
+			Step = Pace * sign;   
 		else
 			Step = dT;
 
@@ -792,7 +769,7 @@ double GetPseudoRange(int tid, int w, double sec, double rpv[6], double tpv[6])
 	return range;
 }
 
-#define MID_RES_PATH "../muti_cod/res/"
+#define MID_RES_PATH "../res/"
 int OpenANSResFileDaily(GPSTIME* Time) {
 	int RetVal;
 	int i = 0, len = 0;
@@ -802,7 +779,6 @@ int OpenANSResFileDaily(GPSTIME* Time) {
 	RetVal = 0;
 	GPSTimeToCommonTime(Time, &ct);
 
-	//[1]�����������ȷ�������۲�ֵ�ļ���FDerOrb DerOrb_YYYY_MM_DD.txt
 	memset(FileName, 0, sizeof(FileName));
 	sprintf(FileName, "%s%4d_%02d_%02d/DerOrb_%4d_%02d_%02d.txt",
 		MID_RES_PATH, ct.Year, ct.Month, ct.Day, ct.Year, ct.Month, ct.Day);
@@ -812,7 +788,6 @@ int OpenANSResFileDaily(GPSTIME* Time) {
 		RetVal = -1;
 	}
 
-	//[2]��������ʱ��ͬ�������۲�ֵ�ļ���FDerClk DerClk_YYYY_MM_DD.txt
 	memset(FileName, 0, sizeof(FileName));
 	sprintf(FileName, "%s%4d_%02d_%02d/DerClk_%4d_%02d_%02d.txt",
 		MID_RES_PATH, ct.Year, ct.Month, ct.Day, ct.Year, ct.Month, ct.Day);
@@ -822,7 +797,6 @@ int OpenANSResFileDaily(GPSTIME* Time) {
 		RetVal = -1;
 	}
 
-	//[3]���������м�в����ļ���FPProc MidRes_YYYY_MM_DD.txt
 	memset(FileName, 0, sizeof(FileName));
 	sprintf(FileName, "%s%4d_%02d_%02d/MidRes_%4d_%02d_%02d.txt",
 		MID_RES_PATH, ct.Year, ct.Month, ct.Day, ct.Year, ct.Month, ct.Day);
@@ -832,7 +806,6 @@ int OpenANSResFileDaily(GPSTIME* Time) {
 		RetVal = -1;
 	}
 
-	//[4]���������м�ֲ����ļ���FPLOG OutlierLog_YYYY_MM_DD.txt
 	memset(FileName, 0, sizeof(FileName));
 	sprintf(FileName, "%s%4d_%02d_%02d/OutlierLog_%4d_%02d_%02d.txt",
 		MID_RES_PATH, ct.Year, ct.Month, ct.Day, ct.Year, ct.Month, ct.Day);
@@ -842,7 +815,6 @@ int OpenANSResFileDaily(GPSTIME* Time) {
 		RetVal = -1;
 	}
 
-	//[5]�����������ļ�, ANSRes_YYYY_MM_DD.txt
 	memset(FileName, 0, sizeof(FileName));
 	sprintf(FileName, "%s%4d_%02d_%02d/ANSRes_%4d_%02d_%02d.txt", MID_RES_PATH, ct.Year, ct.Month, ct.Day, ct.Year, ct.Month, ct.Day);
 	if (Fres != NULL)		fclose(Fres);
@@ -851,7 +823,6 @@ int OpenANSResFileDaily(GPSTIME* Time) {
 		RetVal = -1;
 	}
 
-	//[12]ê��վ�Ƚ��ļ�
 	memset(FileName, 0, sizeof(FileName));
 	sprintf(FileName, "%s%4d_%02d_%02d/MAO_%4d_%02d_%02d.txt",
 		MID_RES_PATH, ct.Year, ct.Month, ct.Day, ct.Year, ct.Month, ct.Day);
@@ -874,10 +845,10 @@ int AssignEpkISLObs(GPSTIME* Time, ISLPROBS* il, ISLPROBS* EpkObs) {
 	list_empty((list*)EpkObs);
 
 	for (iter = (ISLPROBS*)il->next; iter != il;) {
-		dt = GetDifGPSTime(&iter->RvLocTime, Time);//���ݹ۲�ʱ���ȥ��������ʱ��
+		dt = GetDifGPSTime(&iter->RvLocTime, Time);
 
 		if (dt < StepOfAutoNav) {
-			list_erase(il, iter);// ���б���ɾ���ϵ�����
+			list_erase(il, iter);
 			iter_t = iter;
 			iter = (ISLPROBS*)iter->next;
 			if (dt >= 0.0) {
@@ -889,7 +860,7 @@ int AssignEpkISLObs(GPSTIME* Time, ISLPROBS* il, ISLPROBS* EpkObs) {
 			}
 		}
 		else {
-			break;//��һ����������Ĺ۲�����
+			break;
 		}
 	}
 	printf("读取数据成功，共读取%d条星间/星地单向链路数据\n", n);
@@ -916,7 +887,6 @@ void VarEquation(const MJDTIME* Mjd_GPS, const double Phi[],
 		Vel[i] = Phi[3 + i];
 	}
 
-	//AccelMain(&Mjd_TT, Pos, Vel, E, SBInfo, Acc, true, dadr);//г��������������������ѹ����ϫ
 	AccelHarmonic(Pos, E, Acc, true, dadr);
 
 	/*  set df/dy matrix
@@ -994,10 +964,7 @@ void RKF4OrbitSTM(MJDTIME* Mjd_GPS, double step, double Y0[])
 	}
 	VarEquation(Mjd_GPS, Y, dY[4]);     /* 5th time */
 
-
-	/*  ���ֽ��  */
-
-	if (Mjd_GPS->FracDay >= 1.0)    /*  ������ */
+	if (Mjd_GPS->FracDay >= 1.0)
 	{
 		Mjd_GPS->FracDay -= 1.0;
 		Mjd_GPS->Days += 1;
@@ -1014,8 +981,8 @@ void OrbitSTMIntegToGivenTime(const GPSTIME* BegGPS, const GPSTIME* GivenTime, c
 	double Y0[])
 {
 	short   sign;
-	double  Step;              /* ���ֲ���[s] */
-	double  dT;                /*��һʱ���뵱ǰʱ���ʱ������s�� */
+	double  Step;
+	double  dT;
 
 	MJDTIME Mjd_GPS0, Mjd_GivenTime;
 	GPSTimeToMJDTime(BegGPS, &Mjd_GPS0);
@@ -1025,7 +992,7 @@ void OrbitSTMIntegToGivenTime(const GPSTIME* BegGPS, const GPSTIME* GivenTime, c
 
 	if (dT >= 0.0)
 	{
-		sign = 1;        // ��ǰ����
+		sign = 1;
 	}
 	else
 	{
@@ -1035,7 +1002,7 @@ void OrbitSTMIntegToGivenTime(const GPSTIME* BegGPS, const GPSTIME* GivenTime, c
 	do {
 		if (fabs(dT) > Pace)
 		{
-			Step = Pace * sign;    /*  ���û��ֲ��� */
+			Step = Pace * sign;
 		}
 		else
 		{
@@ -1059,9 +1026,8 @@ void RKF4OrbitSTMForInterp(const GPSTIME* GT, const double step, double Y0[Dim_S
 	GPSTimeToMJDTime(GT, &Mjd_GPS);
 
 	CopyArray(Dim_STM, Y, Y0);
-	VarEquation(&Mjd_GPS, Y, dY[0]);     /* first time */ // ״̬ת�ƾ�����ȡ
+	VarEquation(&Mjd_GPS, Y, dY[0]);     /* first time */ 
 
-	// ������ʼ��״̬
 	Interp[0].Time.Week = GT->Week;
 	Interp[0].Time.SecOfWeek = GT->SecOfWeek;
 	CopyArray(Dim_STM, Interp[0].Phi, Y0);
@@ -1097,7 +1063,6 @@ void RKF4OrbitSTMForInterp(const GPSTIME* GT, const double step, double Y0[Dim_S
 	}
 	VarEquation(&Mjd_GPS, Y, dY[4]);     /* 5th time */
 
-	// �����յ�״̬
 	Interp[1].Time.Week = GT->Week;
 	Interp[1].Time.SecOfWeek = GT->SecOfWeek + step;
 
@@ -1123,7 +1088,7 @@ void TimeUpdate(const GPSTIME* Time, SATNET* SatNet) {
 	double Q1_Orb[DIM * DIM];
 	double Pace = 60.0, PredPace = 90.0;
 	MJDTIME Mjd;
-	double h[3] = { 1.43E-11, 5.0E-14, 7.61E-17 };   // For IIR Rb clock��Ҫ���ݱ������������趨
+	double h[3] = { 1.43E-11, 5.0E-14, 7.61E-17 };
 
 	int num = SatNum;
 	AllSatCov = &SatNet->AllSatCov;
@@ -1144,9 +1109,9 @@ void TimeUpdate(const GPSTIME* Time, SATNET* SatNet) {
 	sat = (SATINFO*)SatNet->points;
 	for (i = 0; i < num; i++) {
 		sat = sat->next;
-		//���ʱ��ͬ���˲��Ĺ�����������״̬ת����
+
 		dt = GetDifGPSTime(Time, &(sat->TOE));
-		q = h[0] * h[0] / dt + h[1] * h[1] + h[2] * h[2] * dt;               // ����������
+		q = h[0] * h[0] / dt + h[1] * h[1] + h[2] * h[2] * dt;
 		/*
 		Q1_Clk = [dt^3/3*q    dt^2/2*q]
 				 [dt^2/2*q    dt*q ]
@@ -1168,11 +1133,11 @@ void TimeUpdate(const GPSTIME* Time, SATNET* SatNet) {
 		sat->Clk[0] += sat->Clk[1] * dt;
 		memcpy(AllSatCov->Clk + 2 * i, sat->Clk, sizeof(double) * 2);
 
-		//��ɹ��ȷ���˲��Ĺ���������״̬ת����
+
 		memcpy(Stm, sat->X, sizeof(double) * 6);
 		InitStateTranMatrix(6, DIM, Stm);
 
-		OrbitSTMIntegToGivenTime(&(sat->TOE), Time, Pace, Stm);  //60s����������Ƹ��¹����״̬ת�ƾ���
+		OrbitSTMIntegToGivenTime(&(sat->TOE), Time, Pace, Stm);  
 
 		CopyArray(6, sat->X, Stm);
 		CompStateNoiseCov(dt, sat->Valid, Q1_Orb);
@@ -1180,14 +1145,14 @@ void TimeUpdate(const GPSTIME* Time, SATNET* SatNet) {
 		CopySubMatrix(num * DIM, num * DIM, i * DIM, i * DIM, DIM, DIM, Q_Orb, Q1_Orb);
 
 		InitStateTranMatrix(6, DIM, Stm);
-		RKF4OrbitSTMForInterp(Time, PredPace, Stm, sat->STM);//90s����������Ƹ��¹����״̬ת�ƾ���
+		RKF4OrbitSTMForInterp(Time, PredPace, Stm, sat->STM);
 
 		memcpy(&(sat->TOE), Time, sizeof(GPSTIME));
-		sat->GapTime = sat->GapTime + dt;             // ���û�в�������, �ж�ʱ��һֱ�ۼ�
+		sat->GapTime = sat->GapTime + dt;
 
-		if (sat->GapTime > 2.0 * SECPERHOUR && sat->Valid != BREAKING) { // ��������ж�ʱ�䳬��2h, ����״̬����Ϊ�ж�״̬
-																					// Q����, �ֲ�̽���޲�����, ������Ϊ����Ԥ����״̬���
-			sat->Valid = BREAKING;                                               // ������ȷ�Ĺ۲�ֵ��ɾ��.
+		if (sat->GapTime > 2.0 * SECPERHOUR && sat->Valid != BREAKING) {
+																				
+			sat->Valid = BREAKING;
 			sat->Health = 2;
 
 			GPSTimeToMJDTime(Time, &Mjd);
@@ -1294,7 +1259,6 @@ int GenDerPrObs(ISLPROBS* EpkObs, SATNET* SatNet) {
 	for (isl = EpkObs->next; isl != EpkObs; isl = isl->next) {
 
 		if (isl->Valid == false)  	continue;
-		//�����䷴����·�۲�ֵ
 		for (reisl = isl->next; reisl != EpkObs; reisl = reisl->next) {
 			if (reisl->Valid == false)   continue;
 			if (reisl->RvScid == isl->TrScid && reisl->TrScid == isl->RvScid &&
@@ -1302,8 +1266,8 @@ int GenDerPrObs(ISLPROBS* EpkObs, SATNET* SatNet) {
 
 				obs = (DEROBS*)malloc(sizeof(DEROBS));
 
-				obs->Scid1 = isl->RvScid;//������
-				obs->Scid2 = isl->TrScid;//�ο���
+				obs->Scid1 = isl->RvScid;
+				obs->Scid2 = isl->TrScid;
 				obs->RvAnt = isl->RvAnt;
 				obs->TrAnt = isl->TrAnt;
 				obs->T1 = isl->RvLocTime;
@@ -1347,7 +1311,6 @@ int GenDerPrObs(ISLPROBS* EpkObs, SATNET* SatNet) {
 				list_append(EpkDerObs, obs);
 				n++;
 
-				//���������˫��۲�ֵ�Ĺ۲�ֵ���б�ǣ������ظ�
 				isl->Valid = false;
 				reisl->Valid = false;
 				break;
@@ -1411,57 +1374,44 @@ double GetRelCorr(const double Pos[])
 
 int GenDerObsPredict(DEROBS* derobs) {
 	int		j;
-	double	dt[4], RelCorr[4], dT_Prn1[2], dT_Prn2[2];  // �滮ʱ�䣬����۸������������Ӳ�ο����Ӳ�
+	double	dt[4], RelCorr[4], dT_Prn1[2], dT_Prn2[2];
 	double  trop[2], Tgd[4];
-	double	dPos[3], Range1, Range2;                    // Range1ΪPrn1���ǲ����ļ��ξ��룬Range2ΪPrn2���ǲ����ļ��ξ���
+	double	dPos[3], Range1, Range2;
 	GPSTIME GT;
 	double  m_anchor_X_I[6];
 	SATINFO* sat1, * sat2;
 	ANCHSTN* anc;
 
-	//if (Size < 1)
-	//{
-	//	printf("�������쵼���۲�ֵԤ����ʧ��, û�е����۲�ֵ\n");
-	//	return;
-	//}
-
-
-
-
-	//CASE1 �������ź�������źŵľ�Ϊ����
 	if (derobs->endpoints[0]->type == 1 && derobs->endpoints[1]->type == 1) {
 		sat1 = derobs->endpoints[0];
 		sat2 = derobs->endpoints[1];
 		if (sat1->Valid <= NOINIT || sat2->Valid <= NOINIT)   return 0;
 
-		// ��������prn1�ڽ����ź�ʱ�̵�����״̬
-
 		dt[0] = GetDifGPSTime(&derobs->T1, &sat1->TOE);
 		dT_Prn1[0] = sat1->Clk[0] + sat1->Clk[1] * dt[0];
 		GT.Week = derobs->T1.Week;
-		GT.SecOfWeek = derobs->T1.SecOfWeek - dT_Prn1[0];      // Prn1���ǽ���ʱ�̵�BDTʱ
-		if (Hermite3ForSTM(sat1->STM, &GT, derobs->P1RvState) == 0) 	return 0; //HErmite ��ֵ������ĩ����������������Ƶó�
+		GT.SecOfWeek = derobs->T1.SecOfWeek - dT_Prn1[0];
+		if (Hermite3ForSTM(sat1->STM, &GT, derobs->P1RvState) == 0) 	return 0;
 
 		RelCorr[0] = 0;
 
-		if (sat2->Health != 0) {  // ֻҪPrn2����û��ʧ�ܣ��������ɵ����۲�ֵ
-			// ����Prn2�����ڽ���ʱ�̵�����״̬
+		if (sat2->Health != 0) {
 			dt[2] = GetDifGPSTime(&derobs->T2, &sat2->TOE);
 			dT_Prn2[0] = sat2->Clk[0] + sat2->Clk[1] * dt[2];
 			GT.Week = derobs->T2.Week;
 			GT.SecOfWeek = derobs->T2.SecOfWeek - dT_Prn2[0];
-			if (Hermite3ForSTM(sat2->STM, &GT, derobs->P2RvState) == 0)   return 0;  //����90s���ƽ�����Ƶ��ź��շ�ʱ������λ���ٶȣ���Ȼ����λ��60s�м䣬�õ��Ľ����Ϊ��ȷ
+			if (Hermite3ForSTM(sat2->STM, &GT, derobs->P2RvState) == 0)   return 0;
 			RelCorr[2] = 0;
-			// ����Prn2�����ڷ����ź�ʱ�̵�����״̬��Prn1���ǽ����ź�
+
 			dt[3] = GetDifGPSTime(&derobs->T1, &sat2->TOE);
-			dT_Prn2[1] = sat2->Clk[0] + sat2->Clk[1] * dt[3];              // Prn2���ǵķ���ʱ��
+			dT_Prn2[1] = sat2->Clk[0] + sat2->Clk[1] * dt[3];
 			GT.Week = derobs->T1.Week;
 			GT.SecOfWeek = derobs->T1.SecOfWeek - derobs->isl1->PRObs / C_Light - dT_Prn2[1];
-			if (Hermite3ForSTM(sat2->STM, &GT, derobs->P2TrState) == 0)   return 0;  //�����ڲ���Ԥ��ֵ
+			if (Hermite3ForSTM(sat2->STM, &GT, derobs->P2TrState) == 0)   return 0; 
 			//RelCorr[3] = GetRelCorr( EpkDerObs.DerObsList[i].P2TrState );
 			//Tgd[3] = SatAtod[id2].SatInfo.Tgd[EpkDerObs.DerObsList[i].TrAnt-1];
 			RelCorr[3] = 0;
-			// ����Prn1���źŷ����ʱ��GPSʱ
+
 			dt[1] = GetDifGPSTime(&derobs->T2, &sat1->TOE);
 			dT_Prn1[1] = sat1->Clk[0] + sat1->Clk[1] * dt[1];
 			GT.Week = derobs->T2.Week;
@@ -1470,52 +1420,47 @@ int GenDerObsPredict(DEROBS* derobs) {
 			//RelCorr[1] = GetRelCorr( EpkDerObs->DerObsList[i].P1TrState );
 			//Tgd[1] = SatAtod[id1].SatInfo.Tgd[EpkDerObs->DerObsList[i].RvAnt-1];
 			RelCorr[1] = 0;
-			// �����Ӳ�۲�ֵ�ļ���ֵ P1-P2-2c*dt(ref)
+
 			for (j = 0; j < 3; j++)     dPos[j] = derobs->P1RvState[j] - derobs->P2TrState[j];
 			Range1 = sqrt(VectDot(3, 3, dPos, dPos));
 
 			for (j = 0; j < 3; j++)     dPos[j] = derobs->P2RvState[j] - derobs->P1TrState[j];
 			Range2 = sqrt(VectDot(3, 3, dPos, dPos));
 
-			// �Ӳ�۲�ֵ�ļ���ֵ�� D1 - D2 - 2c*[ Rel(Rv) - Rel(Tr) ]��������Ϊ��λ
-			derobs->CConCorr = RelCorr[0] + RelCorr[1] - RelCorr[2] - RelCorr[3]                // ����۸���
-				- sat1->Tgd[0] + sat2->Tgd[0];   // ����ʱ�Ӹ���
+			derobs->CConCorr = RelCorr[0] + RelCorr[1] - RelCorr[2] - RelCorr[3]
+				- sat1->Tgd[0] + sat2->Tgd[0];
 			derobs->ObsQua.dt[0] = dt[0] + dt[1];
 			derobs->ObsQua.dt[1] = dt[2] + dt[3];
 			derobs->CCObs = Range1 - Range2;
 			derobs->ObsQua.ApriClkResid = derobs->DerCObs - derobs->CCObs - derobs->CConCorr
 				- (dT_Prn1[0] + dT_Prn1[1] - dT_Prn2[0] - dT_Prn2[1]) * C_Light;
 
-			// ������������۲�ֵ�ļ���ֵ P1+P2
 			derobs->CANObs = Range1 + Range2;
-			derobs->AConCorr = RelCorr[0] - RelCorr[1] + RelCorr[2] - RelCorr[3]           // ����۸���
-				+ (dT_Prn1[0] - dT_Prn1[1] + dT_Prn2[0] - dT_Prn2[1]) * C_Light       // �Ӳ����
-				+ 2 * (derobs->isl1->Corr[4] + derobs->isl2->Corr[4])    // ������λ���ĸ���
-				+ (sat1->Tgd[1] + sat2->Tgd[1]) * 2;  // ����ʱ�Ӹ���
+			derobs->AConCorr = RelCorr[0] - RelCorr[1] + RelCorr[2] - RelCorr[3]  
+				+ (dT_Prn1[0] - dT_Prn1[1] + dT_Prn2[0] - dT_Prn2[1]) * C_Light
+				+ 2 * (derobs->isl1->Corr[4] + derobs->isl2->Corr[4])
+				+ (sat1->Tgd[1] + sat2->Tgd[1]) * 2;
 
 			derobs->ObsQua.ApriOrbResid = derobs->DerANObs - derobs->CANObs - derobs->AConCorr;
-			derobs->Valid = 0;     // �ɹ�����õ������۲�ֵ�ļ���ֵ
+			derobs->Valid = 0;
 
 		}
 	}
 
-	//CASE2: �����ź�Ϊ���ǣ������ź�Ϊê��վ
 	else if (derobs->endpoints[0]->type == 1 && derobs->endpoints[1]->type == 0) {
 		sat1 = derobs->endpoints[0];
 		anc = derobs->endpoints[1];
 
 		if (sat1->Valid <= NOINIT)  return 0;
 
-		// ��������prn1�ڽ����ź�ʱ�̵�����״̬
 		dt[0] = GetDifGPSTime(&derobs->T1, &sat1->TOE);
 		dT_Prn1[0] = sat1->Clk[0] + sat1->Clk[1] * dt[0];
 		GT.Week = derobs->T1.Week;
-		GT.SecOfWeek = derobs->T1.SecOfWeek - dT_Prn1[0];      // Prn1���ǽ���ʱ�̵�BDTʱ
-		if (Hermite3ForSTM(sat1->STM, &GT, derobs->P1RvState) == 0) 	return 0;//HErmite ��ֵ������ĩ����������������Ƶó�
+		GT.SecOfWeek = derobs->T1.SecOfWeek - dT_Prn1[0];
+		if (Hermite3ForSTM(sat1->STM, &GT, derobs->P1RvState) == 0) 	return 0;
 		RelCorr[0] = GetRelCorr(derobs->P1RvState);
 		Tgd[0] = sat1->Tgd[derobs->RvAnt - 1];
 
-		// ����Prn1���źŷ����ʱ��GPSʱ
 		dt[1] = GetDifGPSTime(&derobs->T2, &sat1->TOE);
 		dT_Prn1[1] = sat1->Clk[0] + sat1->Clk[1] * dt[1];
 		GT.Week = derobs->T2.Week;
@@ -1524,7 +1469,6 @@ int GenDerObsPredict(DEROBS* derobs) {
 		RelCorr[1] = GetRelCorr(derobs->P1TrState);
 		Tgd[1] = sat1->Tgd[derobs->RvAnt - 1];
 
-		//����ê��վPrn2���źŷ���ʱ�̵Ĺ���ϵ����ֵ
 		dT_Prn2[1] = anc->clk;
 		GT.Week = derobs->T1.Week;
 		GT.SecOfWeek = derobs->T1.SecOfWeek - derobs->isl1->PRObs / C_Light - dT_Prn2[1];
@@ -1534,7 +1478,6 @@ int GenDerObsPredict(DEROBS* derobs) {
 		trop[0] = 0;
 		Tgd[3] = anc->Tgd[0];
 
-		// �����Ӳ�۲�ֵ�ļ���ֵ P1-P2-2c*dt(ref)
 		for (j = 0; j < 3; j++)
 		{
 			dPos[j] = derobs->P1RvState[j] - m_anchor_X_I[j];
@@ -1555,31 +1498,28 @@ int GenDerObsPredict(DEROBS* derobs) {
 			derobs->P2RvState[j] = m_anchor_X_I[j];
 		}
 		Range2 = sqrt(VectDot(3, 3, dPos, dPos));
-
-		// �Ӳ�۲�ֵ�ļ���ֵ�� D1 - D2 - 2c*[ Rel(Rv) - Rel(Tr) ]��������Ϊ��λ            
+       
 		derobs->CConCorr = RelCorr[0] + RelCorr[1] - sat1->Tgd[0] + anc->Tgd[0];
 		derobs->ObsQua.dt[0] = dt[0] + dt[1];
 		derobs->ObsQua.dt[1] = 0.0;
 		derobs->CCObs = Range1 - Range2;
 		derobs->ObsQua.ApriClkResid = derobs->DerCObs - derobs->CCObs - derobs->CConCorr - (dT_Prn1[0] + dT_Prn1[1]) * C_Light;
 
-		// ������������۲�ֵ�ļ���ֵ P1+P2
 		derobs->CANObs = Range1 + Range2;
 		derobs->AConCorr = RelCorr[0] - RelCorr[1] + (dT_Prn1[0] - dT_Prn1[1]) * C_Light
 			+ 2 * (derobs->isl1->Corr[0] + derobs->isl1->Corr[1] + derobs->isl1->Corr[3] + derobs->isl1->Corr[4] + derobs->isl2->Corr[4])
 			+ (sat1->Tgd[1] + anc->Tgd[1]) * 2;
 		derobs->ObsQua.ApriOrbResid = derobs->DerANObs - derobs->CANObs - derobs->AConCorr;
-		derobs->Valid = 0;     // �ɹ�����õ������۲�ֵ�ļ���ֵ
+		derobs->Valid = 0;
 
 	}
-	//CASE3 : �����ź�Ϊ���ǣ������ź�Ϊê��վ
+
 	else if (derobs->endpoints[0]->type == 0 && derobs->endpoints[1]->type == 1) {
 		anc = derobs->endpoints[0];
 		sat2 = derobs->endpoints[1];
 
 		if (sat2->Valid <= NOINIT)  return 0;
 
-		// ����Prn2�����ڽ���ʱ�̵�����״̬
 		dt[2] = GetDifGPSTime(&derobs->T2, &sat2->TOE);
 		dT_Prn2[0] = sat2->Clk[0] + sat2->Clk[1] * dt[2];
 		GT.Week = derobs->T2.Week;
@@ -1588,26 +1528,22 @@ int GenDerObsPredict(DEROBS* derobs) {
 		RelCorr[2] = GetRelCorr(derobs->P2RvState);
 		Tgd[2] = sat2->Tgd[derobs->TrAnt - 1];
 
-		// ����Prn2�����ڷ����ź�ʱ�̵�����״̬��Prn1���ǽ����ź�
 		dt[3] = GetDifGPSTime(&derobs->T1, &sat2->TOE);
-		dT_Prn2[1] = sat2->Clk[0] + sat2->Clk[1] * dt[3];              // Prn2���ǵķ���ʱ��
+		dT_Prn2[1] = sat2->Clk[0] + sat2->Clk[1] * dt[3];
 		GT.Week = derobs->T1.Week;
 		GT.SecOfWeek = derobs->T1.SecOfWeek - derobs->isl1->PRObs / C_Light - dT_Prn2[1];
 		if (Hermite3ForSTM(sat2->STM, &GT, derobs->P2TrState) == 0)  return 0;
 		RelCorr[3] = GetRelCorr(derobs->P2TrState);
 		Tgd[3] = sat2->Tgd[derobs->TrAnt - 1];
 
-		//����ê��վPrn1���źŽ���ʱ�̵Ĺ���ϵ����
-		//�������ê��վ�Ӳ�ĸ��� gxy 20130626
 		dT_Prn1[0] = anc->clk;
 		GT.Week = derobs->T1.Week;
 		GT.SecOfWeek = derobs->T1.SecOfWeek - dT_Prn1[0];
 		ICRF_ITRF_GPST(MJD_J2000, &GT, 0, m_anchor_X_I, anc->Pos);
-		//	trop[0] = hopfield(EpkDerObs->DerObsList[i].P2TrState,m_anchor_X_I);
+
 		trop[0] = 0;
 		Tgd[0] = anc->Tgd[0];
 
-		// �����Ӳ�۲�ֵ�ļ���ֵ P1-P2-2c*dt(ref)
 		for (j = 0; j < 3; j++)
 		{
 			dPos[j] = m_anchor_X_I[j] - derobs->P2TrState[j];
@@ -1632,20 +1568,18 @@ int GenDerObsPredict(DEROBS* derobs) {
 		}
 		Range2 = sqrt(VectDot(3, 3, dPos, dPos));
 
-		// �Ӳ�۲�ֵ�ļ���ֵ�� D1 - D2 - 2c*[ Rel(Rv) - Rel(Tr) ]��������Ϊ��λ
 		derobs->CConCorr = (-1.0) * (RelCorr[2] + RelCorr[3]) - anc->Tgd[0] + sat2->Tgd[0];
 		derobs->ObsQua.dt[0] = 0.0;
 		derobs->ObsQua.dt[1] = dt[2] + dt[3];
 		derobs->CCObs = Range1 - Range2;
 		derobs->ObsQua.ApriClkResid = derobs->DerCObs - derobs->CCObs - derobs->CConCorr + (dT_Prn2[0] + dT_Prn2[1]) * C_Light;
 
-		// ������������۲�ֵ�ļ���ֵ P1+P2
 		derobs->CANObs = Range1 + Range2;
 		derobs->AConCorr = RelCorr[2] - RelCorr[3] + (dT_Prn2[0] - dT_Prn2[1]) * C_Light
 			+ 2 * (derobs->isl1->Corr[0] + derobs->isl1->Corr[1] + derobs->isl1->Corr[3] + derobs->isl1->Corr[4] + derobs->isl2->Corr[4])
 			+ (sat2->Tgd[1] + anc->Tgd[1]) * 2;
 		derobs->ObsQua.ApriOrbResid = derobs->DerANObs - derobs->CANObs - derobs->AConCorr;
-		derobs->Valid = 0;     // �ɹ�����õ������۲�ֵ�ļ���ֵ
+		derobs->Valid = 0;
 
 	}
 	return 1;
@@ -1671,11 +1605,11 @@ void CheckOutlierObs_LG3(SATINFO* SatAtod) {
 		ANO_C[i] = EpkDerObs->ObsQua.ApriOrbResid;
 	}
 
-	CompVectStat(num, CO_C, &MeanClk, &StdClk, SatAtod);  //����CO_C��COMVEC
+	CompVectStat(num, CO_C, &MeanClk, &StdClk, SatAtod);
 	CompVectStat(num, ANO_C, &MeanOrb, &StdOrb, SatAtod);
 
-	StdClk1 = max(StdClk, ClkDiff);     // �㲥�������Ӳ��Ϊ7ns
-	StdOrb1 = max(StdOrb, OrbDiff);     // �㲥�����Ĺ������Ϊ2.5m
+	StdClk1 = max(StdClk, ClkDiff);
+	StdOrb1 = max(StdOrb, OrbDiff);
 
 	for (i = 0; i < num; i++) {
 		EpkDerObs = SatAtod->edges[i];
@@ -1706,10 +1640,6 @@ void CheckOutlierObs_LE3(SATINFO* SatAtod)
 
 	num = SatAtod->edges_num;
 
-
-
-
-	// �ȼ����Ѿ�����������ݵ�ͳ������
 	n = 0;
 	MeanClk = MeanOrb = StdClk = StdOrb = 0.0;
 
@@ -1741,7 +1671,6 @@ void CheckOutlierObs_LE3(SATINFO* SatAtod)
 	}
 	else return;
 
-	// ��ÿ�������۲�ֵ���б��
 	for (i = 0; i < num; i++) {
 		EpkDerObs = SatAtod->edges[i];
 		n = (EpkDerObs->Scid1 == SatAtod->id) ? 0 : 1;
@@ -1767,13 +1696,12 @@ void VerifyOutlier(SATINFO* SatAtod, DEROBS* EpkDerObs) {
 		if ((obs->ClkBlunder[0] == 1 && obs->OrbBlunder[0] == 1) ||
 			(obs->ClkBlunder[1] == 1 && obs->OrbBlunder[1] == 1))
 
-			obs->Valid = 1;//����̽������Ϊ1
+			obs->Valid = 1;
 		else
 		{
 			n = n + 1;
-			obs->Valid = -1;//����̽��ֲ�Ϊ-1
-
-			//�ֲ���Ϣд����־�ļ�	    
+			obs->Valid = -1;
+  
 			printf("DerObs outlier: %12.5f %6d %10.1lf %3d %3d C %10.3lf %2d %2d O %10.3lf %2d %2d\n",
 				Mjd.Days + Mjd.FracDay, FrameTime.Week, FrameTime.SecOfWeek,
 				obs->Scid1, obs->Scid2,
@@ -1781,7 +1709,6 @@ void VerifyOutlier(SATINFO* SatAtod, DEROBS* EpkDerObs) {
 				obs->ClkBlunder[1], obs->ObsQua.ApriOrbResid,
 				obs->OrbBlunder[0], obs->OrbBlunder[1]);
 
-			//�ֲ�д���ļ�
 			fprintf(FPLOG, "DerObs outlier: %12.5f %6d %10.1lf %3d %3d C %10.3lf %2d %2d O %10.3lf %2d %2d\n",
 				Mjd.Days + Mjd.FracDay, FrameTime.Week, FrameTime.SecOfWeek,
 				obs->Scid1, obs->Scid2,
@@ -1798,7 +1725,7 @@ void VerifyOutlier(SATINFO* SatAtod, DEROBS* EpkDerObs) {
 		sat = sat->next;
 		if (sat->Valid < BREAKING)  continue;
 
-		if (fabs(sat->MeanClk_apr) > 3.5 && sat->StdClk_apr < 2.0)   //�����ǵ��Ӳ�Ԥ�����Ƚϲ�Ŵ�״̬���Э�������
+		if (fabs(sat->MeanClk_apr) > 3.5 && sat->StdClk_apr < 2.0)
 		{
 			sat->CovC[0] += fabs(sat->MeanClk_apr) * 1.0E-10;
 		}
@@ -1820,15 +1747,12 @@ void WriteDerObsResidual(SATINFO* SatAtod)
 	Time.SecOfWeek = FrameTime.SecOfWeek + StepOfAutoNav;
 	CheckGPSTime(&Time);
 
-
-	//�Ǽ�۲�ֵ
 	sat = SatAtod;
 
 	for (j = 0; j < SatNum; j++) {
 		sat = sat->next;
 		GPSTimeToMJDTime(&sat->TOE, &mjd);
 
-		//�Ӳ���۲�ֵ�Ĳв����
 		fprintf(FPProc, "%12.5lf %2d C %10.1lf %9.3lf %9.3lf %3d %8.1lf", mjd.Days + mjd.FracDay, sat->id, sqrt(sat->CovC[0]) * C_Light, sat->MeanClk_apr, sat->StdClk_apr, sat->Valid, sat->GapTime);
 
 		//fprintf(FDerClk,"%12.5f %2d ",mjd.Days+mjd.FracDay,SatAtod[j].SCID);
@@ -1851,7 +1775,6 @@ void WriteDerObsResidual(SATINFO* SatAtod)
 		fprintf(FPProc, "\n");
 		fprintf(FDerClk, "\n");
 
-		//��������۲�ֵ�Ĳв����
 		fprintf(FPProc, "%12.5lf %2d O %10.1lf %9.3lf %9.3lf %3d %8.1lf",
 			mjd.Days + mjd.FracDay, sat->id,
 			sqrt(sat->CovX[0] + sat->CovX[7] + sat->CovX[14]), sat->MeanOrb_apr,
@@ -1880,12 +1803,10 @@ void WriteDerObsResidual(SATINFO* SatAtod)
 		fprintf(FDerOrb, "\n");
 	}
 
-	//�ǵع۲�ֵ
 	for (j = 0; j < AncNum; j++)
 	{
 		if (Anchor[j].Valid == false)  continue;
 
-		//�Ӳ���۲�ֵ�Ĳв�
 		fprintf(FPProc, "%12.5lf %2d C        0.0     0.0     0.0    1    0.0",
 			mjd.Days + mjd.FracDay, Anchor[j].StnId);
 
@@ -1908,7 +1829,6 @@ void WriteDerObsResidual(SATINFO* SatAtod)
 		fprintf(FPProc, "\n");
 		fprintf(FDerClk, "\n");
 
-		//��������۲�ֵ�Ĳв�
 		fprintf(FPProc, "%12.5lf %2d O        0.0     0.0     0.0     1    0.0", mjd.Days + mjd.FracDay, Anchor[j].StnId);
 
 		//fprintf(FDerOrb,"%10.3f %2d ",mjd.Days+mjd.FracDay,Anchor[j].StnId);
@@ -1966,8 +1886,8 @@ void CheckAnchorOutlier(ANCHSTN* anc)
 		CompVectStat(num, CO_C, &MeanClk, &StdClk, NULL);
 		CompVectStat(num, ANO_C, &MeanOrb, &StdOrb, NULL);
 
-		StdClk1 = max(StdClk, ClkDiff);     // �㲥�������Ӳ��Ϊ7ns
-		StdOrb1 = max(StdOrb, OrbDiff);     // �㲥�����Ĺ������Ϊ2.5m    
+		StdClk1 = max(StdClk, ClkDiff);
+		StdOrb1 = max(StdOrb, OrbDiff);
 		for (i = 0; i < num; i++) {
 			EpkDerObs = anc->edges[i];
 			ChkClk = EpkDerObs->ObsQua.ApriClkResid - MeanClk;
@@ -1996,31 +1916,26 @@ void DectectDerObsOutlier(SATNET* SatNet)
 	for (i = 0; i < SatNum; i++) {
 		si = si->next;
 
-		si->MeanClk_apr = si->StdClk_apr = si->MeanOrb_apr = si->StdOrb_apr = 999.99;  // û�о����ֲ���
-		// �����Ƕ˴ֲ���
-		if (si->edges_num > 3)	CheckOutlierObs_LG3(si);// ����ʽ������·������3�Ŵֲ��ж�
-		else					CheckOutlierObs_LE3(si);// else
+		si->MeanClk_apr = si->StdClk_apr = si->MeanOrb_apr = si->StdOrb_apr = 999.99;
+
+		if (si->edges_num > 3)	CheckOutlierObs_LG3(si);
+		else					CheckOutlierObs_LE3(si);
 	}
 
 	//for (i = 0; i < SatNum; i++)// 2017.05.15
 	//{
 	//	k = SearchSatIndex(Sat[i].SCID);
-	//	OrbErr[k].VS = Sat[i].ValidObsNum;	//������·��
+	//	OrbErr[k].VS = Sat[i].ValidObsNum;
 	//}
 
-	// ê��վ��صĴֲ���
 	for (i = 0; i < AncNum; i++)
 	{
 		if (Anchor[i].Valid == false)   continue;
 		CheckAnchorOutlier(Anchor + i);
-
-		// ����ê��վ������ת�����ĺ���������Ԥ��EOP�������ת����
-		// Ŀǰ��Ϊê��վ��ͬ���۲�����������4�ţ�����׼ȷУ��
 	}
-	// �ֲ�ȷ��
+
 	VerifyOutlier(SatNet->points, EpkDerObs);
 
-	// ����ͬ�����ǶԵ��ظ����ݽ��б��, ����ʹ�õ�����չ�������˲�
 	for (obs = EpkDerObs->next; obs != EpkDerObs; obs = obs->next) {
 		if (obs->Valid != 1)   continue;
 
@@ -2057,18 +1972,16 @@ void ClkMeasUpdate(SATNET* SatNet)
 	Size = SatNet->ObsNum;
 	AllSatCov = &SatNet->AllSatCov;
 	derobs = SatNet->edges;
-	for (i = 0; i < SatNum; i++) { // ����ÿ�����ǵ�����
+	for (i = 0; i < SatNum; i++) {
 		sat = sat->next;
 		if (sat->Valid > NOINIT) 	ClkRate[i] = sat->Clk[1];
 	}
 
 
-
-	//���ȶ��ǵ���·�۲����ݽ���ʱ��ͬ����������
 	for (i = 0; i < Size; i++) {
 		derobs = derobs->next;
 
-		if (derobs->Valid < 1)  continue;	//�дֲ����ݻ����ǽ���״����
+		if (derobs->Valid < 1)  continue;
 
 		if (derobs->endpoints[0]->type == 1 && derobs->endpoints[1]->type == 1)   continue;
 
@@ -2081,9 +1994,9 @@ void ClkMeasUpdate(SATNET* SatNet)
 			sat = derobs->endpoints[1];
 		}
 
-		if (anc->RefClkFlag != 1)  continue;            // �ǻ�׼��ê��վ
+		if (anc->RefClkFlag != 1)  continue;
 
-		if (sat->Valid <= NOINIT || sat->Health == 0) continue;	//����״̬δ֪��δ��ʼ��
+		if (sat->Valid <= NOINIT || sat->Health == 0) continue;
 		memset(H, 0, MAXSATNUM * 2 * sizeof(double));
 
 		O_C = derobs->DerCObs - derobs->CCObs - derobs->CConCorr
@@ -2095,7 +2008,6 @@ void ClkMeasUpdate(SATNET* SatNet)
 		R = NoiseOfISL * NoiseOfISL;
 		if (ScalarTimeMeasUpdate(O_C, R, H, max((int)derobs->Valid, 2), AllSatCov) == false)
 		{
-			//�Ӳ��������ʧ��д����־�ļ�
 			printf("Clock MeasUpdate fail: SCID %2d %6d %10.1f %10.2f %8.3lf  Ref SCID:%2d\n",
 				sat->id, sat->TOE.Week,
 				sat->TOE.SecOfWeek, O_C,
@@ -2106,22 +2018,21 @@ void ClkMeasUpdate(SATNET* SatNet)
 				sat->TOE.SecOfWeek, O_C,
 				R, anc->StnId);
 		}
-		//SatAtod[ids].State.TotalSatNum++;		//�����źŵ�Ϊ����ê��վ�������źŵ�Ϊ����
 	}
 
 	derobs = EpkDerObs;
-	// ���Ǽ���·���ݽ���ʱ��ͬ����������
+
 	for (i = 0; i < Size; i++)
 	{
 		derobs = derobs->next;
 		sat1 = (SATINFO*)derobs->endpoints[0];
 		sat2 = (SATINFO*)derobs->endpoints[1];
-		if (derobs->Valid < 1)  continue;	//�дֲ����ݻ����ǽ���״����
+		if (derobs->Valid < 1)  continue;
 
 		if (sat1->type == 0 || sat2->type == 0)    continue;
 
 		if (sat1->Valid <= NOINIT || sat2->Valid <= NOINIT ||
-			sat1->Health == 0 || sat2->Health == 0)	//����״̬δ֪��δ��ʼ��
+			sat1->Health == 0 || sat2->Health == 0)
 			continue;
 
 		memset(H, 0, sizeof(double) * MAXSATNUM * 2);
@@ -2137,15 +2048,13 @@ void ClkMeasUpdate(SATNET* SatNet)
 		R = NoiseOfISL * NoiseOfISL;
 		if (ScalarTimeMeasUpdate(O_C, R, H, derobs->Valid, AllSatCov) == false)
 		{
-			derobs->Valid = -1;                 // ���Ϊ�ֲ�
+			derobs->Valid = -1;
 
-			//�Ӳ��������ʧ��д����־�ļ�
 			printf("Clock MeasUpdate fail: %2d %6d %10.1f %10.2f %8.2f  Ref SCID: %2d\n",
 				derobs->Scid1, sat1->TOE.Week,
 				sat1->TOE.SecOfWeek, O_C,
 				R, derobs->Scid2);
 
-			//�Ӳ��������ʧ��д���ļ�
 			fprintf(FPLOG, "Clock MeasUpdate fail: %2d %6d %10.1f %10.2f %8.2f  Ref SCID: %2d\n",
 				derobs->Scid1, sat1->TOE.Week,
 				sat1->TOE.SecOfWeek, O_C,
@@ -2156,7 +2065,6 @@ void ClkMeasUpdate(SATNET* SatNet)
 		//SatAtod[id2].State.TotalSatNum++;
 	}
 
-	// ���õ�ͨ�˲��������Ӳ�仯��
 	sat = (SATINFO*)SatNet->points;
 	for (i = 0; i < SatNum; i++) {
 		sat = sat->next;
@@ -2169,7 +2077,6 @@ void ClkMeasUpdate(SATNET* SatNet)
 		{
 			sat->Clk[1] = 0.99999 * ClkRate[sat->index] + 0.00001 * sat->Clk[1];
 
-			// ÿ5���ӱ���һ���Ӳ����ֵ�������Ӳ���Ϻ�Ԥ��
 			if (fmod(sat->TOE.SecOfWeek + 0.01, 300.0) < 0.5)
 			{
 				sat->SatClk.ClkSeq[sat->SatClk.CurNum] = sat->Clk[0];
@@ -2181,7 +2088,6 @@ void ClkMeasUpdate(SATNET* SatNet)
 		}
 	}
 
-	// ʱ��ͬ���˲�����������
 	sat = (SATINFO*)SatNet->points;
 	int k;
 	double ANO_C[(MAXSATNUM + MAXANCHORNUM) * MAXANTENNA];
@@ -2200,31 +2106,31 @@ void ClkMeasUpdate(SATNET* SatNet)
 				continue;
 
 			if (sat == sat2 && sat1->type == 1) {
-				if (sat1->Valid <= NOINIT)	//����״̬δ֪��δ��ʼ��
+				if (sat1->Valid <= NOINIT)
 					continue;
-				if (sat1->Health == 0)	//�дֲ����ݻ����ǽ���״����
+				if (sat1->Health == 0)
 					continue;
 				ANO_C[j] = derobs->DerCObs - derobs->CCObs - derobs->CConCorr
 					- (2.0 * sat1->Clk[0] + sat1->Clk[1] * derobs->ObsQua.dt[0]) * C_Light
 					+ (2.0 * sat->Clk[0] + sat->Clk[1] * derobs->ObsQua.dt[1]) * C_Light;
 			}
 			if (sat == sat1 && sat2->type == 1) {
-				if (sat2->Valid <= NOINIT)	//����״̬δ֪��δ��ʼ��
+				if (sat2->Valid <= NOINIT)
 					continue;
-				if (sat2->Health == 0)	//�дֲ����ݻ����ǽ���״����
+				if (sat2->Health == 0)
 					continue;
 				ANO_C[j] = derobs->DerCObs - derobs->CCObs - derobs->CConCorr
 					- (2.0 * sat->Clk[0] + sat->Clk[1] * derobs->ObsQua.dt[0]) * C_Light
 					+ (2.0 * sat2->Clk[0] + sat2->Clk[1] * derobs->ObsQua.dt[1]) * C_Light;
 			}
 		}
-		// �ж��Ƿ����ʧ�ܣ��������ʧ�ܣ����ñ���״̬
+	
 		CompVectStat(j, ANO_C, &(sat->MeanClk_pst), &(sat->StdClk_pst), sat);
 		
 		rms0 = sqrt(sat->MeanClk_apr * sat->MeanClk_apr + sat->StdClk_apr * sat->StdClk_apr);
 		rms1 = sqrt(sat->MeanClk_pst * sat->MeanClk_pst + sat->StdClk_pst * sat->StdClk_pst);
 
-		if ((rms1 - rms0) > NoiseOfISL)   // ����Ϊ����ʧ�ܣ����º�ľ��ȸ���
+		if ((rms1 - rms0) > NoiseOfISL)
 		{
 			CopyArray(2, sat->Clk, Clk);
 			CopyArray(4, sat->CovC, CovC);
@@ -2270,29 +2176,23 @@ int ScalarTimeMeasUpdate(double O_C, double sigma2, double H[], int Scale, CONST
 	MatrixMultiply(SatNum * 2, SatNum * 2, SatNum * 2, 1, AllSatCov->ClkCov, H, TmpMat);
 	Error = sigma2 + VectDot(SatNum * 2, SatNum * 2, H, TmpMat);
 
-	// Scale=2Ϊê��վ�Ӳ�Լ������ʹO-C�ܴ�Ҳ������
 	if ((Scale == 1 || Scale == 3) && fabs(O_C) / Error > 3.0)
 	{
 		return false;
 	}
-
-	/* �������˲�������� */
 
 	for (i = 0; i < SatNum * 2; i++)
 	{
 		K[i] = TmpMat[i] / Error;
 	}
 
-	/* ״̬�Ĳ������� */
 	for (i = 0; i < SatNum * 2; i++)
 	{
 		AllSatCov->Clk[i] = AllSatCov->Clk[i] + K[i] * O_C;
 	}
 
-	if (Scale == 3)  return true;              // �ظ����ݣ�������Э�������
+	if (Scale == 3)  return true;
 
-
-	/* ״̬Э������� */
 	Dyadic(SatNum * 2, SatNum * 2, K, H, Mat);
 
 	for (i = 0; i < SatNum * 2; i++)
@@ -2381,16 +2281,16 @@ int CompVectStat(const int n, const double Dat[], double* Mean, double* Std, SAT
 			Limit = 300.0;
 			break;
 		default:
-			Limit = 1E20;      // δ֪״̬��һ�㲻�����
+			Limit = 1E20;
 			break;
 		}
 	}
 
 	CopyArray(n, Val, Dat);
-	mbbub(n, Val);        /* ���� */
+	mbbub(n, Val);
 
 	m = n / 2;
-	Mean1 = Val[n / 2];      /* ȡ�������м�����Ϊƽ��ֵ */
+	Mean1 = Val[n / 2];
 
 	j = 1;
 	while (m - j > 0 && m + j < n)
@@ -2423,7 +2323,7 @@ void ANSMeasUpdate(SATNET* SatNet) {
 
 	int	   i = 0, j = 0, k = 0, Size = 0, n = 0;
 	double dPos[DIM] = { 0 }, O_C = 0, R = 0, H1[DIM] = { 0 }, H2[DIM] = { 0 }, H3[DIM] = { 0 }, H4[DIM] = { 0 }, H_[MAXSATNUM * DIM] = { 0 };
-	double X1[DIM] = { 0 }, X2[DIM] = { 0 }, X3[DIM] = { 0 }, X4[DIM] = { 0 }, Range1 = 0, Range2 = 0;				   // ��ͬʱ�������ǵ�����״̬
+	double X1[DIM] = { 0 }, X2[DIM] = { 0 }, X3[DIM] = { 0 }, X4[DIM] = { 0 }, Range1 = 0, Range2 = 0;
 	double ANO_C[MAXSATNUM * MAXSATNUM] = { 0 };
 	DEROBS* derobs;
 	CONSTSTATE* AllSatCov;
@@ -2451,20 +2351,18 @@ void ANSMeasUpdate(SATNET* SatNet) {
 
 	memset(AllSatCov->Orb, 0, MAXSATNUM * DIM * sizeof(double));
 
-
-	// �����Ǽ���·����
 	for (i = 0; i < Size; i++) {
 		derobs = derobs->next;
 
 		sat1 = (SATINFO*)derobs->endpoints[0];
 		sat2 = (SATINFO*)derobs->endpoints[1];
-		if (derobs->Valid < 1)  continue;	//�дֲ����ݻ����ǽ���״����
+		if (derobs->Valid < 1)  continue;
 
 		if (sat1->type == 0 || sat2->type == 0)    continue;
 
-		if (sat1->edges_num < 2 || sat2->edges_num < 2)   continue;  //����������Ч�۲�ֵ�������в������£���������ӹ�����
+		if (sat1->edges_num < 2 || sat2->edges_num < 2)   continue;
 		if (sat1->Valid <= NOINIT || sat2->Valid <= NOINIT ||
-			sat1->Health == 0 || sat2->Health == 0)	//����״̬δ֪��δ��ʼ��
+			sat1->Health == 0 || sat2->Health == 0)
 			continue;
 
 		memset(H_, 0, MAXSATNUM * DIM * sizeof(double));
@@ -2511,8 +2409,7 @@ void ANSMeasUpdate(SATNET* SatNet) {
 		}
 		else {
 			derobs->Valid = -1;
-
-			//�����������ʧ����Ϣд����־�ļ�    
+  
 			printf("Orbit MeasUpdate fail: SCID %2d %6d %10.1f %10.2f %8.2f  Ref SCID: %2d\n",
 				sat1->id, sat1->TOE.Week,
 				sat1->TOE.SecOfWeek, O_C,
@@ -2527,11 +2424,11 @@ void ANSMeasUpdate(SATNET* SatNet) {
 	}
 
 	derobs = SatNet->edges;
-	// �����ǵ���·����
+
 	for (i = 0; i < Size; i++) {
 		derobs = derobs->next;
 
-		if (derobs->Valid < 1)  continue;	//�дֲ����ݻ����ǽ���״����
+		if (derobs->Valid < 1)  continue;
 
 		if (derobs->endpoints[0]->type == 1 && derobs->endpoints[1]->type == 1)   continue;
 
@@ -2544,8 +2441,8 @@ void ANSMeasUpdate(SATNET* SatNet) {
 			sat = derobs->endpoints[1];
 		}
 
-		if (sat->edges_num < 2)   continue;    // //����������Ч�۲�ֵ�������в������£���������ӹ�����
-		if (sat->Valid <= NOINIT || sat->Health == 0)	continue; //����״̬δ֪��δ��ʼ��
+		if (sat->edges_num < 2)   continue;
+		if (sat->Valid <= NOINIT || sat->Health == 0)	continue;
 		memset(dPos, 0, DIM * sizeof(double));
 		memset(H_, 0, MAXSATNUM * DIM * sizeof(double));
 
@@ -2595,7 +2492,6 @@ void ANSMeasUpdate(SATNET* SatNet) {
 		else {
 			derobs->Valid = -1;
 
-			//�����������ʧ����Ϣд����־�ļ�    
 			printf("Orbit MeasUpdate fail: SCID %2d %6d %10.1f %10.2f %8.2f  Ref SCID: %2d\n",
 				sat->id, sat->TOE.Week,
 				sat->TOE.SecOfWeek, O_C,
@@ -2609,10 +2505,8 @@ void ANSMeasUpdate(SATNET* SatNet) {
 	}
 
 
-
-	// �������º�Ĳв�ͳ��
 	sat = (SATINFO*)SatNet->points;
-	for (i = 0; i < SatNum; i++) {   // ��ÿ�����ǽ���ͳ��
+	for (i = 0; i < SatNum; i++) {
 		sat = sat->next;
 
 		if (sat->Valid <= NOINIT)        continue;
@@ -2626,10 +2520,10 @@ void ANSMeasUpdate(SATNET* SatNet) {
 			sat1 = (SATINFO*)derobs->endpoints[0];
 			sat2 = (SATINFO*)derobs->endpoints[1];
 
-			if (sat1->type == 1 && sat2->type == 1)  // �Ǽ���·����
+			if (sat1->type == 1 && sat2->type == 1)
 			{
 				if (sat1->Valid <= NOINIT || sat2->Valid <= NOINIT ||
-					sat1->Health == 0 || sat2->Health == 0)	//����״̬δ֪��δ��ʼ��
+					sat1->Health == 0 || sat2->Health == 0)
 					continue;
 
 				MatrixMultiply(DIM, DIM, DIM, 1, derobs->P1RvState + 6, AllSatCov->Orb + sat1->index * DIM, X1);
@@ -2649,7 +2543,7 @@ void ANSMeasUpdate(SATNET* SatNet) {
 			}
 			else {
 
-				if (sat->Valid <= NOINIT || sat->Health == 0)	continue; //�дֲ����ݻ����ǽ���״����
+				if (sat->Valid <= NOINIT || sat->Health == 0)	continue;
 
 				if (sat1->type == 1) {
 					MatrixMultiply(DIM, DIM, DIM, 1, derobs->P1RvState + 6, AllSatCov->Orb + sat1->index * DIM, X1);
@@ -2679,16 +2573,15 @@ void ANSMeasUpdate(SATNET* SatNet) {
 			}
 		}
 
-		if (n > 1) {  //������������1�������ظ���· 
+		if (n > 1) {
 			CopyArray(DIM, sat->dX, AllSatCov->Orb + i * DIM);
 			MatrixAddition2(1, DIM, sat->dX, sat->X);
 			GetSubMatrix(SatNum * DIM, SatNum * DIM, i * DIM, i * DIM, DIM, DIM, AllSatCov->OrbCov, sat->CovX);
 		}
 
 		if (n > 1) {
-			sat->GapTime = 0.0;	                  //�������º��ж�ʱ��������
+			sat->GapTime = 0.0;
 
-			// ��������ģ��Ҫ��ϸ���ǡ�
 			R = sqrt(sat->CovX[0] + sat->CovX[7] + sat->CovX[14]);
 			CompVectStat(n, ANO_C, &(sat->MeanOrb_pst), &(sat->StdOrb_pst), sat);
 			Range1 = sqrt(sat->MeanOrb_pst * sat->MeanOrb_pst + sat->StdOrb_pst * sat->StdOrb_pst);
@@ -2721,13 +2614,11 @@ int ScalarOrbitMeasUpdate(double O_C, double sigma2, double H[], int Scale, CONS
 	MatrixMultiply(SatNum * DIM, SatNum * DIM, SatNum * DIM, 1, AllSatCov->OrbCov, H, TmpMat);
 	Error = sigma2 + VectDot(SatNum * DIM, SatNum * DIM, H, TmpMat);
 
-	// Scale=2Ϊ���Լ���������Լ���Ļ�����ʹO-C�ܴ�Ҳ���˳�
 	if ((Scale == 1 || Scale == 3) && fabs(O_C) / Error > 10.0)
 	{
 		return false;
 	}
 
-	/* �������˲�������� */
 
 	for (i = 0; i < SatNum * DIM; i++)
 	{
@@ -2735,15 +2626,12 @@ int ScalarOrbitMeasUpdate(double O_C, double sigma2, double H[], int Scale, CONS
 	}
 
 
-	if (Scale == 3)   return true;         // �ظ����ݲ�����Э�������
+	if (Scale == 3)   return true;
 
-	/* ״̬�Ĳ������� */
 	for (i = 0; i < SatNum * DIM; i++)
 	{
 		AllSatCov->Orb[i] = AllSatCov->Orb[i] + K[i] * O_C;
 	}
-
-	/* ״̬Э������� */
 
 	Dyadic(SatNum * DIM, SatNum * DIM, K, H, Mat);
 

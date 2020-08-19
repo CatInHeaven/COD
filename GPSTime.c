@@ -13,7 +13,7 @@ void CheckGPSTime(GPSTIME* GT) {
 		GT->Week = GT->Week - 1;
 		GT->SecOfWeek = GT->SecOfWeek + SECPERWEEK;
 	}
-	else if (GT->SecOfWeek + 1E-10 > SECPERWEEK) //???
+	else if (GT->SecOfWeek + 1E-10 > SECPERWEEK)
 	{
 		GT->Week = GT->Week + 1;
 		GT->SecOfWeek = GT->SecOfWeek - SECPERWEEK;

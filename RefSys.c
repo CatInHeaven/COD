@@ -4,7 +4,7 @@
 #include <math.h>
 #include <stdio.h>
 
-static double BDT_UTC = 3;        /* 2006Äê1ÔÂ1ÈÕ¿ªÊ¼, ÌøÃëÊı[s],ÔÚÉÏĞÇÇ°ÒªÉèÖÃÎªÕıÈ·µÄÌøÃë */
+static double BDT_UTC = 3;        /* 2006å¹´1æœˆ1æ—¥å¼€å§‹, è·³ç§’æ•°[s],åœ¨ä¸Šæ˜Ÿå‰è¦è®¾ç½®ä¸ºæ­£ç¡®çš„è·³ç§’ */
 EOPPARA EOP[3];
 int InitEOPPara(const MJDTIME* CurrTime)
 {
@@ -105,7 +105,7 @@ void ICRF_ITRF_GPST(const double Mjd1, const GPSTIME* GT,
 {
 	MJDTIME Mjd_TT;
 
-	GPSTimeToMJDTime(GT, &Mjd_TT);    /* ´Ë´¦Mjd_TTÎªBDTÊ±¼äµÄMJD±íÊ¾ */
+	GPSTimeToMJDTime(GT, &Mjd_TT);    /* æ­¤å¤„Mjd_TTä¸ºBDTæ—¶é—´çš„MJDè¡¨ç¤º */
 	Mjd_TT.FracDay = Mjd_TT.FracDay - (BDT_TAI - TT_TAI) / SECPERDAY;
 
 	ICRF_ITRF_MJD(Mjd1, &Mjd_TT, flag, ICRF, ITRF);
@@ -147,12 +147,12 @@ void ICRF_ITRF_MJD(const double Mjd1, const MJDTIME* Mjd2,
 
 	MatrixMultiply(3, 3, 3, 3, Nut, Prec, tmp1);
 	MatrixMultiply(3, 3, 3, 3, Pole, GH, tmp2);
-	MatrixMultiply(3, 3, 3, 3, tmp2, tmp1, U);   /*×ø±ê×ª»»¾ØÕó*/
+	MatrixMultiply(3, 3, 3, 3, tmp2, tmp1, U);   /*åæ ‡è½¬æ¢çŸ©é˜µ*/
 
 	MatrixMultiply(3, 3, 3, 3, Pole, GH_dot, tmp2);
-	MatrixMultiply(3, 3, 3, 3, tmp2, tmp1, U_dot);  /*ËÙ¶È×ª»»¾ØÕó */
+	MatrixMultiply(3, 3, 3, 3, tmp2, tmp1, U_dot);  /*é€Ÿåº¦è½¬æ¢çŸ©é˜µ */
 
-	if (flag == 1)     /*ÌìÇòÏµ¡ª¡ª>µØ¹ÌÏµ */
+	if (flag == 1)     /*å¤©çƒç³»â€”â€”>åœ°å›ºç³» */
 	{
 		MatrixMultiply(3, 3, 3, 1, U, ICRF, ITRF);
 
@@ -162,7 +162,7 @@ void ICRF_ITRF_MJD(const double Mjd1, const MJDTIME* Mjd2,
 		MatrixAddition(3, 1, v1, v2, &ITRF[3]);
 
 	}
-	else  /*µØ¹ÌÏµ¡ª¡ª>ÌìÇòÏµ */
+	else  /*åœ°å›ºç³»â€”â€”>å¤©çƒç³» */
 	{
 		MatrixTranspose(3, 3, U, UT);
 		MatrixTranspose(3, 3, U_dot, U_dotT);
@@ -184,11 +184,11 @@ void InterposeEOP(const MJDTIME* time, EOPPARA* CurrEop)
 
 	t = time->Days + time->FracDay;
 
-	if (fabs(t - EOP[1].Mjd) > 0.8)  /* time²»ÔÚEOP[2]µÄÊ±¼ä¶ÎÄÚ, ÔÚÏßÔËĞĞÊ±Òª¿¼ÂÇEOPÎÄ¼şÊµ¼ÊÍÆËÍÊ±¼ä£¬±ÜÃâÎŞ·¨´ò¿ªÎÄ¼ş */
+	if (fabs(t - EOP[1].Mjd) > 0.8)  /* timeä¸åœ¨EOP[2]çš„æ—¶é—´æ®µå†…, åœ¨çº¿è¿è¡Œæ—¶è¦è€ƒè™‘EOPæ–‡ä»¶å®é™…æ¨é€æ—¶é—´ï¼Œé¿å…æ— æ³•æ‰“å¼€æ–‡ä»¶ */
 	{
-		if (InitEOPPara(time) == 0 && EOP[0].Mjd < 1.0)  // ÎŞ·¨³õÊ¼»¯
+		if (InitEOPPara(time) == 0 && EOP[0].Mjd < 1.0)  // æ— æ³•åˆå§‹åŒ–
 		{
-			printf("No new EOP data in MJD %d.\n", time->Days); // ÊµÊ±³ÌĞò²»ÄÜÍË³öÔËĞĞ
+			printf("No new EOP data in MJD %d.\n", time->Days); // å®æ—¶ç¨‹åºä¸èƒ½é€€å‡ºè¿è¡Œ
 			return;
 		}
 	}
@@ -479,9 +479,9 @@ void ICRF_ITRF_Matrix(const double Mjd1, const MJDTIME* GT,
 
 	MatrixMultiply(3, 3, 3, 3, Nut, Prec, tmp1);
 	MatrixMultiply(3, 3, 3, 3, Pole, GH, tmp2);
-	MatrixMultiply(3, 3, 3, 3, tmp2, tmp1, Mat);   /*×ø±ê×ª»»¾ØÕó*/
+	MatrixMultiply(3, 3, 3, 3, tmp2, tmp1, Mat);   /*åæ ‡è½¬æ¢çŸ©é˜µ*/
 
-	if (flag == 0)     /*ÌìÇòÏµ¡ª¡ª>µØ¹ÌÏµ */
+	if (flag == 0)     /*å¤©çƒç³»â€”â€”>åœ°å›ºç³» */
 	{
 		MatrixTranspose(3, 3, Mat, tmp1);
 		CopyArray(9, Mat, tmp1);
