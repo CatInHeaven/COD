@@ -3,6 +3,7 @@
 #include <string.h>
 #include <math.h>
 #include "main.h"
+#include <sys/time.h>
 
 FILE* FDerOrb, * FDerClk, * FPProc, * FPLOG, * FDerMAO;
 FILE* Fres;
@@ -35,11 +36,18 @@ ISLPROBS* EpkISLObs;
 int main() {
 	if (init() < 0)	return -1;
 	int n = 0;
-	while (n < 1) {
+	struct timeval tv_begin;
+	struct timeval tv_end;
+	double dDuration;
+	gettimeofday(&tv_begin, NULL);
+	while (n < 10) {
 		run();
 		printf("%4d %10.1f\n", FrameTime.Week, FrameTime.SecOfWeek);
 		n++;
 	}
+	gettimeofday(&tv_end, NULL);
+	dDuration = 1000 * (tv_end.tv_sec - tv_begin.tv_sec) + ((tv_end.tv_usec - tv_begin.tv_usec) / 1000.0);
+	printf("Duration: %f ms\n",dDuration);
 	// TODO memory free!
 	graph_destroy((Graph*)SatNet);
 	list_destroy((list*)SimData);
@@ -96,7 +104,6 @@ int init() {
 	}
 
 	fgets(Line, 256, Frin);
-	i = 0;
 	while (1)
 	{
 		memset(Line, 0, sizeof(Line));
@@ -105,7 +112,7 @@ int init() {
 		if (strstr(Line, "EOF") != NULL)         break;
 
 		//if (sscanf(Line, "%*d %*hd %*d %*hd %*hd %*hd %*hd %*hd %*hd %*lf %*hd %*lf %*lf %*lf %*lf %*lf %*lf %*hd", &SCID) != 1)
-		if (sscanf(Line, "%*d %*d %*d %*d %*d %*d %*d %*d %*d %*f %*d %*f %*f %*f %*f %*f %*f %d", &SCID) != 1)
+		if (sscanf(Line, "%*d %*d %d %*d %*d %*d %*d %*d %*d %*f %*d %*f %*f %*f %*f %*f %*f %*d", &SCID) != 1)
 			continue;
 
 		id = (unsigned char)SCID;
@@ -113,13 +120,27 @@ int init() {
 		if ((index = SearchSatIndex(id)) >= 0) {
 			if ((Info = (SATINFO*)malloc(sizeof(SATINFO))) == NULL) return -1;
 			Info->id = id;
-			Info->index = i;
-			i++;
 			SatID[index]->satinfo = Info;
-			list_append((list*)SatNodes, (node_t*)Info);
+			point_append((Graph*)SatNet, (Point*)Info);
 			//TODO: other information initialization
 			Info->URA = 2;
 			Info->PDOP = 0;
+			Info->type = 1;
+			Info->Valid = ANSOK;
+			Info->GapTime = 0.0;
+			Info->SatClk.TotalNum = 0;
+			Info->SatClk.CurNum = 0;
+			Info->MeasStep = 300;
+			Info->MeanClk_pst = 0;
+			Info->StdClk_pst = 0;
+			Info->MeanClk_apr = 0;
+			Info->StdClk_apr = 0;
+			Info->MeanOrb_pst = 0;
+			Info->StdOrb_pst = 0;
+			Info->MeanOrb_apr = 0;
+			Info->StdOrb_apr = 0;
+			Info->Tgd[0] = 0;
+			Info->Tgd[1] = 0;
 		}
 	}
 	fclose(Frin);
@@ -167,24 +188,6 @@ int init() {
 		for (i = 0; i < 3; i++)      p->CovX[i * (DIM + 1)] = pow(SigmaPos, 2.0);
 		for (i = 3; i < 6; i++)      p->CovX[i * (DIM + 1)] = pow(SigmaVel, 2.0);
 
-		// others
-		p->type = 1;
-		p->Valid = ANSOK;
-		p->GapTime = 0.0;
-		p->SatClk.TotalNum = 0;
-		p->SatClk.CurNum = 0;
-		p->MeasStep = 300;
-		p->MeanClk_pst = 0;
-		p->StdClk_pst = 0;
-		p->MeanClk_apr = 0;
-		p->StdClk_apr = 0;
-		p->MeanOrb_pst = 0;
-		p->StdOrb_pst = 0;
-		p->MeanOrb_apr = 0;
-		p->StdOrb_apr = 0;
-		p->Tgd[0] = 0;
-		p->Tgd[1] = 0;
-
 		CopyArray(2, AllSatCov->Clk + 2 * p->index, p->Clk);
 		CopySubMatrix(SatNum* DIM, SatNum* DIM, p->index * DIM, p->index * DIM, DIM, DIM, AllSatCov->OrbCov, p->CovX);
 		CopySubMatrix(SatNum * 2, SatNum * 2, p->index * 2, p->index * 2, 2, 2, AllSatCov->ClkCov, p->CovC);
@@ -194,7 +197,7 @@ int init() {
 
 	// initialize anchor station information
 	if ((Anchor = (ANCHSTN*)malloc(sizeof(ANCHSTN))) == NULL) return -1;
-	list_append((list*)SatNodes, (node_t*)Anchor);
+	point_append((Graph*)SatNet, (Point*)Anchor);
 	Anchor[0].StnId = 76;
 	Anchor[0].type = 0;
 	Anchor[0].clk = 0.0;
@@ -263,7 +266,7 @@ void run() {
 		OpenANSResFileDaily(&NextFramTime);
 	}
 	// add link to Satellite Network
-	AssignEpkISLObs(&NextFramTime, SimData, EpkISLObs);
+	AssignEpkISLObs(&NextFramTime, SimData, SatNet);
 
 	TimeUpdate(&NextFramTime, SatNet);
 	GenDerPrObs(EpkISLObs, SatNet);
@@ -333,7 +336,7 @@ int ReadSimObsData(GPSTIME* Time, ISLPROBS* islist) {
 
 		obs->PRObs = GetPseudoRange(obs->TrScid, obs->RvLocTime.Week, obs->RvLocTime.SecOfWeek, rpv, tpv);
 
-		obs->Valid = true;
+		//obs->Valid = true;
 		for (int i = 0; i < 10; i++)  *(obs->Corr + i) = 0.0;
 		if (obs->TrScid != 0 && obs->RvScid != 0 && fabs(obs->PRObs) > 0.1)
 			list_append((list*)islist, (node_t*)obs);
@@ -733,28 +736,55 @@ int OpenANSResFileDaily(GPSTIME* Time) {
 	return RetVal;
 }
 
-int AssignEpkISLObs(GPSTIME* Time, ISLPROBS* il, ISLPROBS* EpkObs) {
-	int n;
+int AssignEpkISLObs(GPSTIME* Time, ISLPROBS* il, SATNET* SatNet) {
+	int n, id;
 	double dt = 0.0;
-	ISLPROBS* iter, * iter_t;
+	Point *p1, *p2;
+	node_t *iter;
+	ISLPROBS* isl;
+	EdgeList *edge_in, *edge_out;
 
-	//if (EpkObs.ObsList.size() != 0)   EpkObs.ObsList.clear();
+	graph_refresh((Graph*)SatNet);
 	n = 0;
-	list_empty((list*)EpkObs);
 
-	for (iter = (ISLPROBS*)il->next; iter != il;) {
-		dt = GetDifGPSTime(&iter->RvLocTime, Time);
-
-		if (dt < StepOfAutoNav) {
-			list_erase((list*)il, (node_t *)iter);
-			iter_t = iter;
-			iter = (ISLPROBS*)iter->next;
+	for (iter = il->next; iter != (node_t*)il;) {
+		isl = (ISLPROBS*)iter;
+		dt = GetDifGPSTime(&isl->RvLocTime, Time);
+		iter = iter->next;
+		if (dt < StepOfAutoNav) {	
 			if (dt >= 0.0) {
-				list_append((list*)EpkObs, (node_t*)iter_t);
+				list_delete((list*)il, iter->prev);
+				p1 = (Point*)GetSatIndex(isl->RvScid);
+				p2 = (Point*)GetSatIndex(isl->TrScid);
+				if (p1 == NULL) {
+					if ((id = GetAnchorIndex(isl->RvScid)) < 0)
+						continue;
+					p1 = (Point*)&Anchor[id];
+				}
+				if (p2 == NULL) {
+					if ((id = GetAnchorIndex(isl->TrScid)) < 0)
+						continue;
+					p2 = (Point*)&Anchor[id];
+				}
+				isl->endpoints[0] = p1;
+				isl->endpoints[1] = p2;
+				edge_in = (EdgeList*)malloc(sizeof(EdgeList));
+				edge_out = (EdgeList*)malloc(sizeof(EdgeList));
+				edge_in->edge = (Edge*)isl;
+				edge_out->edge = (Edge*)isl;
+				edge_in->flag = 0;
+				edge_out->flag = 0;
+				edge_in->reverse = edge_out;
+				edge_out->reverse = edge_in;
+				list_append((list*)&p1->in_edges, (node_t*)edge_in);
+				list_append((list*)&p2->out_edges, (node_t*)edge_out);
+				p1->in_num++;
+				p2->out_num++;
+
 				n++;
 			}
 			else {
-				free(iter_t);
+				list_erase((list*)il, iter->prev);
 			}
 		}
 		else {
@@ -1140,83 +1170,132 @@ void CompStateNoiseCov(const double Step, const ANSTATEID Valid, double Q[])
 	}
 }
 
-
 int GenDerPrObs(ISLPROBS* EpkObs, SATNET* SatNet) {
-	int i, j, n, anc_id;
+	int i, j, k, n, anc_id;
 	DEROBS* obs;
 	ISLPROBS* isl, * reisl;
 	DEROBS* EpkDerObs = (DEROBS*)SatNet->edges;
 	Point* p1, * p2;
-
-
-	//if (EpkDerObs->DerObsList.size() != 0)   EpkDerObs.DerObsList.clear();
-	graph_refresh((Graph*)SatNet);
+	
 	SatNet->ObsNum = 0;
 	n = 0;
 
-	for (isl = (ISLPROBS*)EpkObs->next; isl != EpkObs; isl = (ISLPROBS*)isl->next) {
+	Point* node;
+	EdgeList *e_in, *e_out, *obs_el;
+	Edge *in_edge, *out_edge;
+	int flag;
+	node = SatNet->points;
+	for (i = 0; i < SatNum; i++){
+		node = (Point*)node->next;
+		for (e_in = (EdgeList*)node->in_edges.next; e_in != &node->in_edges;) {
+			if (e_in->flag == 1){
+				e_in = (EdgeList*)e_in->next;
+				continue;
+			} 
+			if (e_in->flag == 2) {
+				e_in = (EdgeList*)e_in->next;
+				list_erase((list*)&node->in_edges, ((node_t*)e_in)->prev);
+				node->in_num--;
+				continue;
+			} 
+			if (e_in->reverse->flag == 1) {
+				e_in->edge = e_in->reverse->edge;
+				e_in->flag = 1;
+				e_in = (EdgeList*)e_in->next;
+				continue;
+			}
 
-		if (isl->Valid == false)  	continue;
-		for (reisl = (ISLPROBS*)isl->next; reisl != EpkObs; reisl = (ISLPROBS*)reisl->next) {
-			if (reisl->Valid == false)   continue;
-			if (reisl->RvScid == isl->TrScid && reisl->TrScid == isl->RvScid &&
-				reisl->RvAnt == isl->TrAnt && reisl->TrAnt == isl->RvAnt) {
-
-				obs = (DEROBS*)malloc(sizeof(DEROBS));
-
-				obs->Scid1 = isl->RvScid;
-				obs->Scid2 = isl->TrScid;
-				obs->RvAnt = isl->RvAnt;
-				obs->TrAnt = isl->TrAnt;
-				obs->T1 = isl->RvLocTime;
-				obs->T2 = reisl->RvLocTime;
-				obs->isl1 = isl;
-				obs->isl2 = reisl;
-				obs->DerCObs = isl->PRObs - reisl->PRObs;
-				obs->DerANObs = isl->PRObs + reisl->PRObs;
-				obs->ClkBlunder[0] = 0;
-				obs->ClkBlunder[1] = 0;
-				obs->OrbBlunder[0] = 0;
-				obs->OrbBlunder[1] = 0;
-				//obs->Quality = EpkObs->ObsList[i].Quality + EpkObs->ObsList[j].Quality;
-				obs->Valid = -1;
-
-				p1 = (Point*)GetSatIndex(isl->RvScid);
-				p2 = (Point*)GetSatIndex(isl->TrScid);
-				if (p1 == NULL) {
-					if ((anc_id = GetAnchorIndex(isl->RvScid)) < 0)
-						continue;
-					p1 = (Point*)&Anchor[anc_id];
-				}
-				if (p2 == NULL) {
-					if ((anc_id = GetAnchorIndex(isl->TrScid)) < 0)
-						continue;
-					p2 = (Point*)&Anchor[anc_id];
-				}
-				obs->endpoints[0] = p1;
-				obs->endpoints[1] = p2;
-
-				if (GenDerObsPredict(obs) == 0) {
-					free(obs);
+			in_edge = e_in->edge;
+			flag = 0;
+			for (e_out = (EdgeList*)node->out_edges.next; e_out != &node->out_edges;) {
+				if (e_out->flag == 1) {
+					e_out = (EdgeList*)e_out->next;
 					continue;
 				}
-
-				p1->edges[p1->edges_num] = (Edge*)obs;
-				p2->edges[p2->edges_num] = (Edge*)obs;
-				p1->edges_num++;
-				p2->edges_num++;
-
-				list_append((list*)EpkDerObs, (node_t*)obs);
-				n++;
-
-				isl->Valid = false;
-				reisl->Valid = false;
-				break;
+				if (e_out->flag == 2) {
+					e_out = (EdgeList*)e_out->next;
+					list_erase((list*)&node->out_edges, ((node_t*)e_out)->prev);
+					node->out_num--;
+					continue;
+				}
+				if (e_out->reverse->flag == 1) {
+					e_out->edge = e_out->reverse->edge;
+					e_out->flag = 1;
+					e_out = (EdgeList*)e_out->next;
+					continue;
+				}
+				out_edge = e_out->edge;
+				if (out_edge->endpoints[0] == in_edge->endpoints[1]) {
+					if (GetDifGPSTime(&((ISLPROBS*)in_edge)->RvLocTime, &((ISLPROBS*)out_edge)->RvLocTime) < 0) {
+						isl = (ISLPROBS*)in_edge;
+						reisl = (ISLPROBS*)out_edge;
+						obs_el = (EdgeList*)e_in;
+						e_in->flag = 1;
+						e_out->reverse->flag = 2;
+						e_in = (EdgeList*)e_in->next;
+						e_out = (EdgeList*)e_out->next;
+						list_erase((list*)&node->out_edges, ((node_t*)e_out)->prev);
+						node->out_num--;
+					}
+					else {
+						reisl = (ISLPROBS*)in_edge;
+						isl = (ISLPROBS*)out_edge;
+						obs_el = (EdgeList*)e_out;
+						e_out->flag = 1;
+						e_in->reverse->flag = 2;
+						e_in = (EdgeList*)e_in->next;
+						e_out = (EdgeList*)e_out->next;
+						list_erase((list*)&node->in_edges, ((node_t*)e_in)->prev);
+						node->in_num--;
+					}
+					obs = (DEROBS*)malloc(sizeof(DEROBS));
+					obs->Scid1 = isl->RvScid;
+					obs->Scid2 = isl->TrScid;
+					obs->RvAnt = isl->RvAnt;
+					obs->TrAnt = isl->TrAnt;
+					obs->T1 = isl->RvLocTime;
+					obs->T2 = reisl->RvLocTime;
+					obs->DerCObs = isl->PRObs - reisl->PRObs;
+					obs->DerANObs = isl->PRObs + reisl->PRObs;
+					obs->ClkBlunder[0] = 0;
+					obs->ClkBlunder[1] = 0;
+					obs->OrbBlunder[0] = 0;
+					obs->OrbBlunder[1] = 0;
+					obs->Valid = -1;
+					obs->endpoints[0] = isl->endpoints[0];
+					obs->endpoints[1] = isl->endpoints[1];
+					obs_el->edge = (Edge*)obs;
+					if (GenDerObsPredict(obs, isl, reisl) == 0) {
+						free(obs);
+						continue;
+					}
+					flag = 1;
+					list_append((list*)EpkDerObs, (node_t*)obs);
+					n++;
+					break;
+				}
+				e_out = (EdgeList*)e_out->next;
 			}
+			if (flag == 0) {
+				e_in->reverse->flag = 2;
+				e_in = (EdgeList*)e_in->next;
+				list_erase((list*)&node->in_edges, ((node_t*)e_in)->prev);
+				node->in_num--;
+			}
+		}
+
+		for (e_out = (EdgeList*)node->out_edges.next; e_out != &node->out_edges;) {
+			out_edge = e_out->edge;
+			if (e_out->flag == 0) {
+				e_out->reverse->flag = 2;
+				e_out = (EdgeList*)e_out->next;
+				list_erase((list*)&node->out_edges,(node_t*)e_out->prev);
+				node->out_num--;
+			}
+			else e_out = (EdgeList*)e_out->next;
 		}
 	}
 	SatNet->ObsNum = n;
-
 	printf("生成导出观测值完成，共生成%d个导出观测值\n", n);
 	return true;
 }
@@ -1270,7 +1349,7 @@ double GetRelCorr(const double Pos[])
 	return Corr;
 }
 
-int GenDerObsPredict(DEROBS* derobs) {
+int GenDerObsPredict(DEROBS* derobs, ISLPROBS* isl1, ISLPROBS* isl2) {
 	int		j;
 	double	dt[4], RelCorr[4], dT_Prn1[2], dT_Prn2[2];
 	double  trop[2], Tgd[4];
@@ -1304,7 +1383,7 @@ int GenDerObsPredict(DEROBS* derobs) {
 			dt[3] = GetDifGPSTime(&derobs->T1, &sat2->TOE);
 			dT_Prn2[1] = sat2->Clk[0] + sat2->Clk[1] * dt[3];
 			GT.Week = derobs->T1.Week;
-			GT.SecOfWeek = derobs->T1.SecOfWeek - derobs->isl1->PRObs / C_Light - dT_Prn2[1];
+			GT.SecOfWeek = derobs->T1.SecOfWeek - isl1->PRObs / C_Light - dT_Prn2[1];
 			if (Hermite3ForSTM(sat2->STM, &GT, derobs->P2TrState) == 0)   return 0; 
 			//RelCorr[3] = GetRelCorr( EpkDerObs.DerObsList[i].P2TrState );
 			//Tgd[3] = SatAtod[id2].SatInfo.Tgd[EpkDerObs.DerObsList[i].TrAnt-1];
@@ -1313,7 +1392,7 @@ int GenDerObsPredict(DEROBS* derobs) {
 			dt[1] = GetDifGPSTime(&derobs->T2, &sat1->TOE);
 			dT_Prn1[1] = sat1->Clk[0] + sat1->Clk[1] * dt[1];
 			GT.Week = derobs->T2.Week;
-			GT.SecOfWeek = derobs->T2.SecOfWeek - derobs->isl2->PRObs / C_Light - dT_Prn1[1];
+			GT.SecOfWeek = derobs->T2.SecOfWeek - isl2->PRObs / C_Light - dT_Prn1[1];
 			if (Hermite3ForSTM(sat1->STM, &GT, derobs->P1TrState) == 0)   return 0;
 			//RelCorr[1] = GetRelCorr( EpkDerObs->DerObsList[i].P1TrState );
 			//Tgd[1] = SatAtod[id1].SatInfo.Tgd[EpkDerObs->DerObsList[i].RvAnt-1];
@@ -1336,7 +1415,7 @@ int GenDerObsPredict(DEROBS* derobs) {
 			derobs->CANObs = Range1 + Range2;
 			derobs->AConCorr = RelCorr[0] - RelCorr[1] + RelCorr[2] - RelCorr[3]  
 				+ (dT_Prn1[0] - dT_Prn1[1] + dT_Prn2[0] - dT_Prn2[1]) * C_Light
-				+ 2 * (derobs->isl1->Corr[4] + derobs->isl2->Corr[4])
+				+ 2 * (isl1->Corr[4] + isl2->Corr[4])
 				+ (sat1->Tgd[1] + sat2->Tgd[1]) * 2;
 
 			derobs->ObsQua.ApriOrbResid = derobs->DerANObs - derobs->CANObs - derobs->AConCorr;
@@ -1362,14 +1441,14 @@ int GenDerObsPredict(DEROBS* derobs) {
 		dt[1] = GetDifGPSTime(&derobs->T2, &sat1->TOE);
 		dT_Prn1[1] = sat1->Clk[0] + sat1->Clk[1] * dt[1];
 		GT.Week = derobs->T2.Week;
-		GT.SecOfWeek = derobs->T2.SecOfWeek - derobs->isl2->PRObs / C_Light - dT_Prn1[1];
+		GT.SecOfWeek = derobs->T2.SecOfWeek - isl2->PRObs / C_Light - dT_Prn1[1];
 		if (Hermite3ForSTM(sat1->STM, &GT, derobs->P1TrState) == 0)   return 0;
 		RelCorr[1] = GetRelCorr(derobs->P1TrState);
 		Tgd[1] = sat1->Tgd[derobs->RvAnt - 1];
 
 		dT_Prn2[1] = anc->clk;
 		GT.Week = derobs->T1.Week;
-		GT.SecOfWeek = derobs->T1.SecOfWeek - derobs->isl1->PRObs / C_Light - dT_Prn2[1];
+		GT.SecOfWeek = derobs->T1.SecOfWeek - isl1->PRObs / C_Light - dT_Prn2[1];
 		ICRF_ITRF_GPST(MJD_J2000, &GT, 0, m_anchor_X_I, anc->Pos);
 
 		//trop[0] = hopfield(EpkDerObs->DerObsList[i].P1RvState,m_anchor_X_I);
@@ -1405,7 +1484,7 @@ int GenDerObsPredict(DEROBS* derobs) {
 
 		derobs->CANObs = Range1 + Range2;
 		derobs->AConCorr = RelCorr[0] - RelCorr[1] + (dT_Prn1[0] - dT_Prn1[1]) * C_Light
-			+ 2 * (derobs->isl1->Corr[0] + derobs->isl1->Corr[1] + derobs->isl1->Corr[3] + derobs->isl1->Corr[4] + derobs->isl2->Corr[4])
+			+ 2 * (isl1->Corr[0] + isl1->Corr[1] + isl1->Corr[3] + isl1->Corr[4] + isl2->Corr[4])
 			+ (sat1->Tgd[1] + anc->Tgd[1]) * 2;
 		derobs->ObsQua.ApriOrbResid = derobs->DerANObs - derobs->CANObs - derobs->AConCorr;
 		derobs->Valid = 0;
@@ -1429,7 +1508,7 @@ int GenDerObsPredict(DEROBS* derobs) {
 		dt[3] = GetDifGPSTime(&derobs->T1, &sat2->TOE);
 		dT_Prn2[1] = sat2->Clk[0] + sat2->Clk[1] * dt[3];
 		GT.Week = derobs->T1.Week;
-		GT.SecOfWeek = derobs->T1.SecOfWeek - derobs->isl1->PRObs / C_Light - dT_Prn2[1];
+		GT.SecOfWeek = derobs->T1.SecOfWeek - isl1->PRObs / C_Light - dT_Prn2[1];
 		if (Hermite3ForSTM(sat2->STM, &GT, derobs->P2TrState) == 0)  return 0;
 		RelCorr[3] = GetRelCorr(derobs->P2TrState);
 		Tgd[3] = sat2->Tgd[derobs->TrAnt - 1];
@@ -1452,7 +1531,7 @@ int GenDerObsPredict(DEROBS* derobs) {
 
 		dT_Prn1[1] = anc->clk;
 		GT.Week = derobs->T2.Week;
-		GT.SecOfWeek = derobs->T2.SecOfWeek - derobs->isl2->PRObs / C_Light - dT_Prn1[1];
+		GT.SecOfWeek = derobs->T2.SecOfWeek - isl2->PRObs / C_Light - dT_Prn1[1];
 		ICRF_ITRF_GPST(MJD_J2000, &GT, 0, m_anchor_X_I, anc->Pos);
 
 		//trop[1] = hopfield(EpkDerObs->DerObsList[i].P2RvState,m_anchor_X_I);
@@ -1474,7 +1553,7 @@ int GenDerObsPredict(DEROBS* derobs) {
 
 		derobs->CANObs = Range1 + Range2;
 		derobs->AConCorr = RelCorr[2] - RelCorr[3] + (dT_Prn2[0] - dT_Prn2[1]) * C_Light
-			+ 2 * (derobs->isl1->Corr[0] + derobs->isl1->Corr[1] + derobs->isl1->Corr[3] + derobs->isl1->Corr[4] + derobs->isl2->Corr[4])
+			+ 2 * (isl1->Corr[0] + isl1->Corr[1] + isl1->Corr[3] + isl1->Corr[4] + isl2->Corr[4])
 			+ (sat2->Tgd[1] + anc->Tgd[1]) * 2;
 		derobs->ObsQua.ApriOrbResid = derobs->DerANObs - derobs->CANObs - derobs->AConCorr;
 		derobs->Valid = 0;
@@ -1484,23 +1563,32 @@ int GenDerObsPredict(DEROBS* derobs) {
 }
 
 void CheckOutlierObs_LG3(SATINFO* SatAtod) {
-	int i, n, num;
+	int i, num;
 	double MeanClk, MeanOrb, StdClk, StdOrb, StdClk1, StdOrb1;
 	double* CO_C, * ANO_C;
 	double ChkClk, ChkOrb;
 	DEROBS* EpkDerObs;
+	EdgeList* el;
 
-	num = SatAtod->edges_num;
+	num = SatAtod->in_num + SatAtod->out_num;
 	CO_C = (double*)malloc(num * sizeof(double));
 	ANO_C = (double*)malloc(num * sizeof(double));
 
 	memset(CO_C, 0, sizeof(double) * num);
 	memset(ANO_C, 0, sizeof(double) * num);
 
-	for (i = 0; i < num; i++) {
-		EpkDerObs = (DEROBS*)SatAtod->edges[i];
+	i = 0;
+	for (el = (EdgeList*)SatAtod->in_edges.next; el != &SatAtod->in_edges; el = (EdgeList*)el->next) {
+		EpkDerObs = (DEROBS*)el->edge;
 		CO_C[i] = EpkDerObs->ObsQua.ApriClkResid;
 		ANO_C[i] = EpkDerObs->ObsQua.ApriOrbResid;
+		i++;
+	}
+	for (el = (EdgeList*)SatAtod->out_edges.next; el != &SatAtod->out_edges; el = (EdgeList*)el->next) {
+		EpkDerObs = (DEROBS*)el->edge;
+		CO_C[i] = EpkDerObs->ObsQua.ApriClkResid;
+		ANO_C[i] = EpkDerObs->ObsQua.ApriOrbResid;
+		i++;
 	}
 
 	CompVectStat(num, CO_C, &MeanClk, &StdClk, SatAtod);
@@ -1509,18 +1597,27 @@ void CheckOutlierObs_LG3(SATINFO* SatAtod) {
 	StdClk1 = max(StdClk, ClkDiff);
 	StdOrb1 = max(StdOrb, OrbDiff);
 
-	for (i = 0; i < num; i++) {
-		EpkDerObs = (DEROBS*)SatAtod->edges[i];
+	for (el = (EdgeList*)SatAtod->in_edges.next; el != &SatAtod->in_edges; el = (EdgeList*)el->next) {
+		EpkDerObs = (DEROBS*)el->edge;
 		ChkClk = EpkDerObs->ObsQua.ApriClkResid - MeanClk;
 		ChkOrb = EpkDerObs->ObsQua.ApriOrbResid - MeanOrb;
 
-		n = (EpkDerObs->Scid1 == SatAtod->id) ? 0 : 1;
-		if (fabs(ChkClk) < 3.0 * StdClk1)	EpkDerObs->ClkBlunder[n] = 1;
-		else								EpkDerObs->ClkBlunder[n] = 2;
-		if (fabs(ChkOrb) < 3.0 * StdOrb1)	EpkDerObs->OrbBlunder[n] = 1;
-		else								EpkDerObs->OrbBlunder[n] = 2;
+		if (fabs(ChkClk) < 3.0 * StdClk1)	EpkDerObs->ClkBlunder[0] = 1;
+		else								EpkDerObs->ClkBlunder[0] = 2;
+		if (fabs(ChkOrb) < 3.0 * StdOrb1)	EpkDerObs->OrbBlunder[0] = 1;
+		else								EpkDerObs->OrbBlunder[0] = 2;
 	}
 
+	for (el = (EdgeList*)SatAtod->out_edges.next; el != &SatAtod->out_edges; el = (EdgeList*)el->next) {
+		EpkDerObs = (DEROBS*)el->edge;
+		ChkClk = EpkDerObs->ObsQua.ApriClkResid - MeanClk;
+		ChkOrb = EpkDerObs->ObsQua.ApriOrbResid - MeanOrb;
+
+		if (fabs(ChkClk) < 3.0 * StdClk1)	EpkDerObs->ClkBlunder[1] = 1;
+		else								EpkDerObs->ClkBlunder[1] = 2;
+		if (fabs(ChkOrb) < 3.0 * StdOrb1)	EpkDerObs->OrbBlunder[1] = 1;
+		else								EpkDerObs->OrbBlunder[1] = 2;
+	}
 	SatAtod->MeanClk_apr = MeanClk;
 	SatAtod->StdClk_apr = StdClk;
 	SatAtod->MeanOrb_apr = MeanOrb;
@@ -1529,20 +1626,20 @@ void CheckOutlierObs_LG3(SATINFO* SatAtod) {
 	free(ANO_C);
 }
 
-void CheckOutlierObs_LE3(SATINFO* SatAtod)
-{
-	int i, n, num;
+void CheckOutlierObs_LE3(SATINFO* SatAtod) {
+	int n, num;
 	double MeanClk, MeanOrb, StdClk, StdOrb;
 	double ChkClk, ChkOrb;
 	DEROBS* EpkDerObs;
+	EdgeList* el;
 
-	num = SatAtod->edges_num;
+	num = SatAtod->in_num + SatAtod->out_num;
 
 	n = 0;
 	MeanClk = MeanOrb = StdClk = StdOrb = 0.0;
 
-	for (i = 0; i < num; i++) {
-		EpkDerObs = (DEROBS*)SatAtod->edges[i];
+	for (el = (EdgeList*)SatAtod->in_edges.next; el != &SatAtod->in_edges; el = (EdgeList*)el->next) {
+		EpkDerObs = (DEROBS*)el->edge;
 		if ((EpkDerObs->ClkBlunder[0] == 1 && EpkDerObs->OrbBlunder[0] == 1) ||
 			(EpkDerObs->ClkBlunder[1] == 1 && EpkDerObs->OrbBlunder[1] == 1))
 		{
@@ -1554,6 +1651,21 @@ void CheckOutlierObs_LE3(SATINFO* SatAtod)
 			n++;
 		}
 	}
+
+	for (el = (EdgeList*)SatAtod->in_edges.next; el != &SatAtod->in_edges; el = (EdgeList*)el->next) {
+		EpkDerObs = (DEROBS*)el->edge;
+		if ((EpkDerObs->ClkBlunder[0] == 1 && EpkDerObs->OrbBlunder[0] == 1) ||
+			(EpkDerObs->ClkBlunder[1] == 1 && EpkDerObs->OrbBlunder[1] == 1))
+		{
+			MeanClk += EpkDerObs->ObsQua.ApriClkResid;
+			MeanOrb += EpkDerObs->ObsQua.ApriOrbResid;
+
+			StdClk += EpkDerObs->ObsQua.ApriClkResid * EpkDerObs->ObsQua.ApriClkResid;
+			StdOrb += EpkDerObs->ObsQua.ApriOrbResid * EpkDerObs->ObsQua.ApriOrbResid;
+			n++;
+		}
+	}
+
 
 	if (n > 1)
 	{
@@ -1567,18 +1679,31 @@ void CheckOutlierObs_LE3(SATINFO* SatAtod)
 		StdOrb = 2.5;
 		StdClk = 2.1;
 	}
-	else return;
+	else {
+		printf("n=0\n");
+		return;
+	}
 
-	for (i = 0; i < num; i++) {
-		EpkDerObs = (DEROBS*)SatAtod->edges[i];
-		n = (EpkDerObs->Scid1 == SatAtod->id) ? 0 : 1;
+	for (el = (EdgeList*)SatAtod->in_edges.next; el != &SatAtod->in_edges; el = (EdgeList*)el->next) {
+		EpkDerObs = (DEROBS*)el->edge;
 		ChkClk = EpkDerObs->ObsQua.ApriClkResid - MeanClk;
 		ChkOrb = EpkDerObs->ObsQua.ApriOrbResid - MeanOrb;
-		if (fabs(ChkClk) < 3.0 * StdClk)	EpkDerObs->ClkBlunder[n] = 1;
-		else								EpkDerObs->ClkBlunder[n] = 2;
-		if (fabs(ChkOrb) < 3.0 * StdOrb)	EpkDerObs->OrbBlunder[n] = 1;
-		else								EpkDerObs->OrbBlunder[n] = 2;
 
+		if (fabs(ChkClk) < 3.0 * StdClk)	EpkDerObs->ClkBlunder[0] = 1;
+		else								EpkDerObs->ClkBlunder[0] = 2;
+		if (fabs(ChkOrb) < 3.0 * StdOrb)	EpkDerObs->OrbBlunder[0] = 1;
+		else								EpkDerObs->OrbBlunder[0] = 2;
+	}
+
+	for (el = (EdgeList*)SatAtod->out_edges.next; el != &SatAtod->out_edges; el = (EdgeList*)el->next) {
+		EpkDerObs = (DEROBS*)el->edge;
+		ChkClk = EpkDerObs->ObsQua.ApriClkResid - MeanClk;
+		ChkOrb = EpkDerObs->ObsQua.ApriOrbResid - MeanOrb;
+
+		if (fabs(ChkClk) < 3.0 * StdClk)	EpkDerObs->ClkBlunder[1] = 1;
+		else								EpkDerObs->ClkBlunder[1] = 2;
+		if (fabs(ChkOrb) < 3.0 * StdOrb)	EpkDerObs->OrbBlunder[1] = 1;
+		else								EpkDerObs->OrbBlunder[1] = 2;
 	}
 }
 
@@ -1635,11 +1760,12 @@ void VerifyOutlier(SATINFO* SatAtod, DEROBS* EpkDerObs) {
 
 void WriteDerObsResidual(SATINFO* SatAtod)
 {
-	int i, j;
+	int j;
 	MJDTIME mjd;
 	GPSTIME  Time;
 	SATINFO* sat;
 	DEROBS* EpkDerObs;
+	EdgeList* el;
 
 	Time.Week = FrameTime.Week;
 	Time.SecOfWeek = FrameTime.SecOfWeek + StepOfAutoNav;
@@ -1656,8 +1782,22 @@ void WriteDerObsResidual(SATINFO* SatAtod)
 		//fprintf(FDerClk,"%12.5f %2d ",mjd.Days+mjd.FracDay,SatAtod[j].SCID);
 		fprintf(FDerClk, "%4d %6.0lf %4d ", Time.Week, Time.SecOfWeek, sat->id);
 
-		for (i = 0; i < sat->edges_num; i++) {
-			EpkDerObs = (DEROBS*)sat->edges[i];
+		for (el = (EdgeList*)sat->in_edges.next; el != &sat->in_edges; el = (EdgeList*)el->next) {
+			EpkDerObs = (DEROBS*)el->edge;
+			//n = (EpkDerObs->DerObsList[i].Scid1 == SatAtod[j].SCID)? 0 : 1;
+			fprintf(FPProc, "%10.3lf %2d %2d %3d %3d",
+				EpkDerObs->ObsQua.ApriClkResid, EpkDerObs->ClkBlunder[0],
+				EpkDerObs->ClkBlunder[1], EpkDerObs->Valid,
+				((EpkDerObs->Scid1 == sat->id) ? EpkDerObs->Scid2 : EpkDerObs->Scid1));
+
+			fprintf(FDerClk, "%4d %14.3lf %14.3lf %14.3lf %4d %4d %4d", ((EpkDerObs->Scid1 == sat->id) ? EpkDerObs->Scid2 : EpkDerObs->Scid1),
+				EpkDerObs->DerCObs, EpkDerObs->CCObs,
+				EpkDerObs->CConCorr, EpkDerObs->ClkBlunder[0], EpkDerObs->ClkBlunder[1],
+				EpkDerObs->Valid);
+
+		}
+		for (el = (EdgeList*)sat->out_edges.next; el != &sat->out_edges; el = (EdgeList*)el->next) {
+			EpkDerObs = (DEROBS*)el->edge;
 			//n = (EpkDerObs->DerObsList[i].Scid1 == SatAtod[j].SCID)? 0 : 1;
 			fprintf(FPProc, "%10.3lf %2d %2d %3d %3d",
 				EpkDerObs->ObsQua.ApriClkResid, EpkDerObs->ClkBlunder[0],
@@ -1682,8 +1822,23 @@ void WriteDerObsResidual(SATINFO* SatAtod)
 		//fprintf(FDerOrb,"%10.3f %2d ",mjd.Days+mjd.FracDay,SatAtod[j].SCID);
 		fprintf(FDerOrb, "%4d %6.0lf %4d ", Time.Week, Time.SecOfWeek, sat->id);
 
-		for (i = 0; i < sat->edges_num; i++) {
-			EpkDerObs = (DEROBS*)sat->edges[i];
+		for (el = (EdgeList*)sat->in_edges.next; el != &sat->in_edges; el = (EdgeList*)el->next) {
+			EpkDerObs = (DEROBS*)el->edge;
+			//n = (EpkDerObs->DerObsList[i].Scid1 == SatAtod[j].SCID)? 0 : 1;
+			fprintf(FPProc, "%10.3lf %2d %2d %3d %3d",
+				EpkDerObs->ObsQua.ApriOrbResid, EpkDerObs->OrbBlunder[0],
+				EpkDerObs->OrbBlunder[1], EpkDerObs->Valid,
+				((EpkDerObs->Scid1 == sat->id) ? EpkDerObs->Scid2 : EpkDerObs->Scid1));
+
+			fprintf(FDerOrb, "%4d %14.3lf %14.3lf %14.3lf %4d %4d %4d",
+				((EpkDerObs->Scid1 == sat->id) ? EpkDerObs->Scid2 : EpkDerObs->Scid1),
+				EpkDerObs->DerANObs, EpkDerObs->CANObs,
+				EpkDerObs->AConCorr, EpkDerObs->OrbBlunder[0],
+				EpkDerObs->OrbBlunder[1], EpkDerObs->Valid);
+
+		}
+		for (el = (EdgeList*)sat->out_edges.next; el != &sat->out_edges; el = (EdgeList*)el->next) {
+			EpkDerObs = (DEROBS*)el->edge;
 			//n = (EpkDerObs->DerObsList[i].Scid1 == SatAtod[j].SCID)? 0 : 1;
 			fprintf(FPProc, "%10.3lf %2d %2d %3d %3d",
 				EpkDerObs->ObsQua.ApriOrbResid, EpkDerObs->OrbBlunder[0],
@@ -1710,8 +1865,22 @@ void WriteDerObsResidual(SATINFO* SatAtod)
 
 		//fprintf(FDerClk,"%12.5lf %2d C ",mjd.Days+mjd.FracDay,Anchor[j].StnId);
 		fprintf(FDerClk, "%4d %6.0lf %4d ", Time.Week, Time.SecOfWeek, Anchor[j].StnId);
-		for (i = 0; i < Anchor[j].edges_num; i++) {
-			EpkDerObs = (DEROBS*)Anchor[j].edges[i];
+		for (el = (EdgeList*)Anchor[j].in_edges.next; el != &Anchor[j].in_edges; el = (EdgeList*)el->next) {
+			EpkDerObs = (DEROBS*)el->edge;
+			//n = (EpkDerObs->DerObsList[i].Scid1 == Anchor[j].StnId)? 0 : 1;
+
+			fprintf(FPProc, "%10.3lf %2d %2d %3d %3d",
+				EpkDerObs->ObsQua.ApriClkResid, EpkDerObs->ClkBlunder[0],
+				EpkDerObs->ClkBlunder[1], EpkDerObs->Valid,
+				((EpkDerObs->Scid1 == Anchor[j].StnId) ? EpkDerObs->Scid2 : EpkDerObs->Scid1));
+
+			fprintf(FDerClk, "%4d %14.3lf %14.3lf %14.3lf %4d %4d %4d", ((EpkDerObs->Scid1 == Anchor[j].StnId) ? EpkDerObs->Scid2 : EpkDerObs->Scid1),
+				EpkDerObs->DerCObs, EpkDerObs->CCObs,
+				EpkDerObs->CConCorr, EpkDerObs->ClkBlunder[0], EpkDerObs->ClkBlunder[1],
+				EpkDerObs->Valid);
+		}
+		for (el = (EdgeList*)Anchor[j].out_edges.next; el != &Anchor[j].out_edges; el = (EdgeList*)el->next) {
+			EpkDerObs = (DEROBS*)el->edge;
 			//n = (EpkDerObs->DerObsList[i].Scid1 == Anchor[j].StnId)? 0 : 1;
 
 			fprintf(FPProc, "%10.3lf %2d %2d %3d %3d",
@@ -1731,8 +1900,21 @@ void WriteDerObsResidual(SATINFO* SatAtod)
 
 		//fprintf(FDerOrb,"%10.3f %2d ",mjd.Days+mjd.FracDay,Anchor[j].StnId);
 		fprintf(FDerOrb, "%4d %6.0lf %4d ", Time.Week, Time.SecOfWeek, Anchor[j].StnId);
-		for (i = 0; i < Anchor[j].edges_num; i++) {
-			EpkDerObs = (DEROBS*)Anchor[j].edges[i];
+		for (el = (EdgeList*)Anchor[j].in_edges.next; el != &Anchor[j].in_edges; el = (EdgeList*)el->next) {
+			EpkDerObs = (DEROBS*)el->edge;
+			//n = (EpkDerObs->DerObsList[i].Scid1 == Anchor[j].StnId)? 0 : 1;
+			fprintf(FPProc, "%10.3lf %2d %2d %3d %3d",
+				EpkDerObs->ObsQua.ApriOrbResid, EpkDerObs->OrbBlunder[0],
+				EpkDerObs->OrbBlunder[1], EpkDerObs->Valid,
+				((EpkDerObs->Scid1 == Anchor[j].StnId) ? EpkDerObs->Scid2 : EpkDerObs->Scid1));
+			fprintf(FDerOrb, "%4d %14.3lf %14.3lf %14.3lf %4d %4d %4d",
+				((EpkDerObs->Scid1 == Anchor[j].StnId) ? EpkDerObs->Scid2 : EpkDerObs->Scid1),
+				EpkDerObs->DerANObs, EpkDerObs->CANObs,
+				EpkDerObs->AConCorr, EpkDerObs->OrbBlunder[0],
+				EpkDerObs->OrbBlunder[1], EpkDerObs->Valid);
+		}
+		for (el = (EdgeList*)Anchor[j].out_edges.next; el != &Anchor[j].out_edges; el = (EdgeList*)el->next) {
+			EpkDerObs = (DEROBS*)el->edge;
 			//n = (EpkDerObs->DerObsList[i].Scid1 == Anchor[j].StnId)? 0 : 1;
 			fprintf(FPProc, "%10.3lf %2d %2d %3d %3d",
 				EpkDerObs->ObsQua.ApriOrbResid, EpkDerObs->OrbBlunder[0],
@@ -1756,14 +1938,15 @@ void WriteDerObsResidual(SATINFO* SatAtod)
 
 void CheckAnchorOutlier(ANCHSTN* anc)
 {
-	int i, n, num;
+	int i, num;
 	double MeanClk, MeanOrb, StdClk, StdOrb, StdClk1, StdOrb1;
 	double* CO_C, * ANO_C;
 	double ChkClk, ChkOrb;
 	DEROBS* EpkDerObs;
+	EdgeList* el;
 
 	MeanClk = MeanOrb = StdClk = StdOrb = 0.0;
-	num = anc->edges_num;
+	num = anc->in_num + anc->out_num;
 
 	CO_C = (double*)malloc(num * sizeof(double));
 	ANO_C = (double*)malloc(num * sizeof(double));
@@ -1771,10 +1954,18 @@ void CheckAnchorOutlier(ANCHSTN* anc)
 	memset(CO_C, 0, sizeof(double) * num);
 	memset(ANO_C, 0, sizeof(double) * num);
 
-	for (i = 0; i < num; i++) {
-		EpkDerObs = (DEROBS*)anc->edges[i];
+	i = 0;
+	for (el = (EdgeList*)anc->in_edges.next ; el != &anc->in_edges; el = (EdgeList*)el->next) {
+		EpkDerObs = (DEROBS*)el->edge;
 		CO_C[i] = EpkDerObs->ObsQua.ApriClkResid;
 		ANO_C[i] = EpkDerObs->ObsQua.ApriOrbResid;
+		i++;
+	}
+	for (el = (EdgeList*)anc->out_edges.next ; el != &anc->out_edges; el = (EdgeList*)el->next) {
+		EpkDerObs = (DEROBS*)el->edge;
+		CO_C[i] = EpkDerObs->ObsQua.ApriClkResid;
+		ANO_C[i] = EpkDerObs->ObsQua.ApriOrbResid;
+		i++;
 	}
 
 	if (num > 3)
@@ -1786,16 +1977,26 @@ void CheckAnchorOutlier(ANCHSTN* anc)
 
 		StdClk1 = max(StdClk, ClkDiff);
 		StdOrb1 = max(StdOrb, OrbDiff);
-		for (i = 0; i < num; i++) {
-			EpkDerObs = (DEROBS*)anc->edges[i];
+		for (el = (EdgeList*)anc->in_edges.next ; el != &anc->in_edges; el = (EdgeList*)el->next) {
+			EpkDerObs = (DEROBS*)el->edge;
 			ChkClk = EpkDerObs->ObsQua.ApriClkResid - MeanClk;
 			ChkOrb = EpkDerObs->ObsQua.ApriOrbResid - MeanOrb;
 
-			n = (EpkDerObs->Scid1 == anc->StnId) ? 0 : 1;
-			if (fabs(ChkClk) < 3.0 * StdClk1)   EpkDerObs->ClkBlunder[n] = 1;
-			else                           EpkDerObs->ClkBlunder[n] = 2;
-			if (fabs(ChkOrb) < 3.0 * StdOrb1)   EpkDerObs->OrbBlunder[n] = 1;
-			else                           EpkDerObs->OrbBlunder[n] = 2;
+			if (fabs(ChkClk) < 3.0 * StdClk1)   EpkDerObs->ClkBlunder[0] = 1;
+			else                           		EpkDerObs->ClkBlunder[0] = 2;
+			if (fabs(ChkOrb) < 3.0 * StdOrb1)   EpkDerObs->OrbBlunder[0] = 1;
+			else                           		EpkDerObs->OrbBlunder[0] = 2;
+
+		}
+		for (el = (EdgeList*)anc->out_edges.next ; el != &anc->out_edges; el = (EdgeList*)el->next) {
+			EpkDerObs = (DEROBS*)el->edge;
+			ChkClk = EpkDerObs->ObsQua.ApriClkResid - MeanClk;
+			ChkOrb = EpkDerObs->ObsQua.ApriOrbResid - MeanOrb;
+
+			if (fabs(ChkClk) < 3.0 * StdClk1)   EpkDerObs->ClkBlunder[1] = 1;
+			else                           		EpkDerObs->ClkBlunder[1] = 2;
+			if (fabs(ChkOrb) < 3.0 * StdOrb1)   EpkDerObs->OrbBlunder[1] = 1;
+			else                           		EpkDerObs->OrbBlunder[1] = 2;
 
 		}
 	}
@@ -1815,9 +2016,8 @@ void DectectDerObsOutlier(SATNET* SatNet)
 		si = (SATINFO*)si->next;
 
 		si->MeanClk_apr = si->StdClk_apr = si->MeanOrb_apr = si->StdOrb_apr = 999.99;
-
-		if (si->edges_num > 3)	CheckOutlierObs_LG3(si);
-		else					CheckOutlierObs_LE3(si);
+		if (si->in_num + si->out_num > 3)	CheckOutlierObs_LG3(si);
+		else								CheckOutlierObs_LE3(si);
 	}
 
 	//for (i = 0; i < SatNum; i++)// 2017.05.15
@@ -1854,7 +2054,7 @@ void DectectDerObsOutlier(SATNET* SatNet)
 
 void ClkMeasUpdate(SATNET* SatNet)
 {
-	int	i = 0, j = 0, Size = 0;
+	int	i = 0, Size = 0;
 
 	double	O_C = 0, R = 0, H[MAXSATNUM * 2] = { 0 }, ClkRate[MAXSATNUM] = { 0 }, rms0 = 0, rms1 = 0;
 	DEROBS* derobs;
@@ -1865,6 +2065,7 @@ void ClkMeasUpdate(SATNET* SatNet)
 	double  CovC[4];
 	SATINFO* sat1;
 	SATINFO* sat2;
+	EdgeList* el;
 
 	sat = (SATINFO*)SatNet->points;
 	Size = SatNet->ObsNum;
@@ -1987,16 +2188,37 @@ void ClkMeasUpdate(SATNET* SatNet)
 	}
 
 	sat = (SATINFO*)SatNet->points;
-	int k;
+	int j, k;
 	double ANO_C[(MAXSATNUM + MAXANCHORNUM) * MAXANTENNA];
-	for (k = 0; k < MAXSATNUM; k++)
+	
+	for (k = 0; k < SatNum; k++)
 	{
 		sat = (SATINFO*)sat->next;
 		if (sat->Valid <= NOINIT || sat->Health == 0)
 			continue;
+		j = 0;
+		for (el = (EdgeList*)sat->in_edges.next; el != &sat->in_edges; el = (EdgeList*)el->next) {
+			derobs = (DEROBS*)el->edge;
+			sat1 = (SATINFO*)derobs->endpoints[0];
+			sat2 = (SATINFO*)derobs->endpoints[1];
 
-		for (j = 0; j < sat->edges_num; j++) {
-			derobs = (DEROBS*)sat->edges[j];
+			if (derobs->Valid < 1)
+				continue;
+
+			if (sat2->type == 1) {
+				if (sat2->Valid <= NOINIT)
+					continue;
+				if (sat2->Health == 0)
+					continue;
+				ANO_C[j] = derobs->DerCObs - derobs->CCObs - derobs->CConCorr
+					- (2.0 * sat->Clk[0] + sat->Clk[1] * derobs->ObsQua.dt[0]) * C_Light
+					+ (2.0 * sat2->Clk[0] + sat2->Clk[1] * derobs->ObsQua.dt[1]) * C_Light;
+				j++;
+			}
+			
+		}
+		for (el = (EdgeList*)sat->out_edges.next; el != &sat->out_edges; el = (EdgeList*)el->next) {
+			derobs = (DEROBS*)el->edge;
 			sat1 = (SATINFO*)derobs->endpoints[0];
 			sat2 = (SATINFO*)derobs->endpoints[1];
 
@@ -2011,15 +2233,7 @@ void ClkMeasUpdate(SATNET* SatNet)
 				ANO_C[j] = derobs->DerCObs - derobs->CCObs - derobs->CConCorr
 					- (2.0 * sat1->Clk[0] + sat1->Clk[1] * derobs->ObsQua.dt[0]) * C_Light
 					+ (2.0 * sat->Clk[0] + sat->Clk[1] * derobs->ObsQua.dt[1]) * C_Light;
-			}
-			if (sat == sat1 && sat2->type == 1) {
-				if (sat2->Valid <= NOINIT)
-					continue;
-				if (sat2->Health == 0)
-					continue;
-				ANO_C[j] = derobs->DerCObs - derobs->CCObs - derobs->CConCorr
-					- (2.0 * sat->Clk[0] + sat->Clk[1] * derobs->ObsQua.dt[0]) * C_Light
-					+ (2.0 * sat2->Clk[0] + sat2->Clk[1] * derobs->ObsQua.dt[1]) * C_Light;
+				j++;
 			}
 		}
 	
@@ -2229,6 +2443,7 @@ void ANSMeasUpdate(SATNET* SatNet) {
 	SATINFO* sat2;
 	SATINFO* sat;
 	ANCHSTN* anc;
+	EdgeList* el;
 
 	printf("开始进行钟轨道测量更新\n");
 
@@ -2258,7 +2473,7 @@ void ANSMeasUpdate(SATNET* SatNet) {
 
 		if (sat1->type == 0 || sat2->type == 0)    continue;
 
-		if (sat1->edges_num < 2 || sat2->edges_num < 2)   continue;
+		if (sat1->in_num + sat1->out_num < 2 || sat2->in_num + sat2->out_num < 2)   continue;
 		if (sat1->Valid <= NOINIT || sat2->Valid <= NOINIT ||
 			sat1->Health == 0 || sat2->Health == 0)
 			continue;
@@ -2339,7 +2554,7 @@ void ANSMeasUpdate(SATNET* SatNet) {
 			sat = (SATINFO*)derobs->endpoints[1];
 		}
 
-		if (sat->edges_num < 2)   continue;
+		if (sat->in_num + sat->out_num < 2)   continue;
 		if (sat->Valid <= NOINIT || sat->Health == 0)	continue;
 		memset(dPos, 0, DIM * sizeof(double));
 		memset(H_, 0, MAXSATNUM * DIM * sizeof(double));
@@ -2407,21 +2622,19 @@ void ANSMeasUpdate(SATNET* SatNet) {
 	for (i = 0; i < SatNum; i++) {
 		sat = (SATINFO*)sat->next;
 
-		if (sat->Valid <= NOINIT)        continue;
+		if (sat->Valid <= NOINIT || sat->Health == 0)        continue;
 
 		n = 0;
 
-		for (j = 0; j < sat->edges_num; j++) {
-			derobs = (DEROBS*)sat->edges[j];
+		for (el = (EdgeList*)sat->in_edges.next; el != &sat->in_edges; el = (EdgeList*)el->next) {
+			derobs = (DEROBS*)el->edge;
 			if (derobs->Valid < 1)   continue;
 
 			sat1 = (SATINFO*)derobs->endpoints[0];
 			sat2 = (SATINFO*)derobs->endpoints[1];
 
-			if (sat1->type == 1 && sat2->type == 1)
-			{
-				if (sat1->Valid <= NOINIT || sat2->Valid <= NOINIT ||
-					sat1->Health == 0 || sat2->Health == 0)
+			if (sat2->type == 1) {
+				if (sat2->Valid <= NOINIT || sat2->Health == 0)
 					continue;
 
 				MatrixMultiply(DIM, DIM, DIM, 1, derobs->P1RvState + 6, AllSatCov->Orb + sat1->index * DIM, X1);
@@ -2441,32 +2654,55 @@ void ANSMeasUpdate(SATNET* SatNet) {
 			}
 			else {
 
-				if (sat->Valid <= NOINIT || sat->Health == 0)	continue;
+				MatrixMultiply(DIM, DIM, DIM, 1, derobs->P1RvState + 6, AllSatCov->Orb + sat1->index * DIM, X1);
+				MatrixMultiply(DIM, DIM, DIM, 1, derobs->P1TrState + 6, AllSatCov->Orb + sat1->index * DIM, X2);
+				MatrixAddition2(1, DIM, derobs->P1RvState, X1);    // X1=X1+Phi*dX
+				MatrixAddition2(1, DIM, derobs->P1TrState, X2);
 
-				if (sat1->type == 1) {
-					MatrixMultiply(DIM, DIM, DIM, 1, derobs->P1RvState + 6, AllSatCov->Orb + sat1->index * DIM, X1);
-					MatrixMultiply(DIM, DIM, DIM, 1, derobs->P1TrState + 6, AllSatCov->Orb + sat1->index * DIM, X2);
-					MatrixAddition2(1, DIM, derobs->P1RvState, X1);    // X1=X1+Phi*dX
-					MatrixAddition2(1, DIM, derobs->P1TrState, X2);
+				for (k = 0; k < 3; k++)      dPos[k] = X1[k] - derobs->P2TrState[k];
+				Range1 = sqrt(VectDot(3, 3, dPos, dPos));
+				for (k = 0; k < 3; k++)      dPos[k] = X2[k] - derobs->P2RvState[k];
+				Range2 = sqrt(VectDot(3, 3, dPos, dPos));
+				ANO_C[n++] = derobs->DerANObs - Range1 - Range2 - derobs->AConCorr;
+			}
+		}
+		for (el = (EdgeList*)sat->out_edges.next; el != &sat->out_edges; el = (EdgeList*)el->next) {
+			derobs = (DEROBS*)el->edge;
+			if (derobs->Valid < 1)   continue;
 
-					for (k = 0; k < 3; k++)      dPos[k] = X1[k] - derobs->P2TrState[k];
-					Range1 = sqrt(VectDot(3, 3, dPos, dPos));
-					for (k = 0; k < 3; k++)      dPos[k] = X2[k] - derobs->P2RvState[k];
-					Range2 = sqrt(VectDot(3, 3, dPos, dPos));
-				}
-				else
-				{
-					MatrixMultiply(DIM, DIM, DIM, 1, derobs->P2RvState + 6, AllSatCov->Orb + sat2->index * DIM, X3);
-					MatrixMultiply(DIM, DIM, DIM, 1, derobs->P2TrState + 6, AllSatCov->Orb + sat2->index * DIM, X4);
-					MatrixAddition2(1, DIM, derobs->P2RvState, X3);    // X1=X1+Phi*dX
-					MatrixAddition2(1, DIM, derobs->P2TrState, X4);
+			sat1 = (SATINFO*)derobs->endpoints[0];
+			sat2 = (SATINFO*)derobs->endpoints[1];
 
-					for (k = 0; k < 3; k++)      dPos[k] = X4[k] - derobs->P1RvState[k];
-					Range1 = sqrt(VectDot(3, 3, dPos, dPos));
-					for (k = 0; k < 3; k++)      dPos[k] = X3[k] - derobs->P1TrState[k];
-					Range2 = sqrt(VectDot(3, 3, dPos, dPos));
-				}
+			if (sat1->type == 1) {
+				if (sat1->Valid <= NOINIT || sat1->Health == 0)
+					continue;
 
+				MatrixMultiply(DIM, DIM, DIM, 1, derobs->P1RvState + 6, AllSatCov->Orb + sat1->index * DIM, X1);
+				MatrixMultiply(DIM, DIM, DIM, 1, derobs->P1TrState + 6, AllSatCov->Orb + sat1->index * DIM, X2);
+				MatrixMultiply(DIM, DIM, DIM, 1, derobs->P2RvState + 6, AllSatCov->Orb + sat2->index * DIM, X3);
+				MatrixMultiply(DIM, DIM, DIM, 1, derobs->P2TrState + 6, AllSatCov->Orb + sat2->index * DIM, X4);
+				MatrixAddition2(1, DIM, derobs->P1RvState, X1);    // X1=X1+Phi*dX
+				MatrixAddition2(1, DIM, derobs->P1TrState, X2);
+				MatrixAddition2(1, DIM, derobs->P2RvState, X3);    // X1=X1+Phi*dX
+				MatrixAddition2(1, DIM, derobs->P2TrState, X4);
+
+				for (k = 0; k < 3; k++)      dPos[k] = X1[k] - X4[k];
+				Range1 = sqrt(VectDot(3, 3, dPos, dPos));
+				for (k = 0; k < 3; k++)      dPos[k] = X3[k] - X2[k];
+				Range2 = sqrt(VectDot(3, 3, dPos, dPos));
+				ANO_C[n++] = derobs->DerANObs - Range1 - Range2 - derobs->AConCorr;
+			}
+			else {
+
+				MatrixMultiply(DIM, DIM, DIM, 1, derobs->P2RvState + 6, AllSatCov->Orb + sat2->index * DIM, X3);
+				MatrixMultiply(DIM, DIM, DIM, 1, derobs->P2TrState + 6, AllSatCov->Orb + sat2->index * DIM, X4);
+				MatrixAddition2(1, DIM, derobs->P2RvState, X3);    // X1=X1+Phi*dX
+				MatrixAddition2(1, DIM, derobs->P2TrState, X4);
+
+				for (k = 0; k < 3; k++)      dPos[k] = X4[k] - derobs->P1RvState[k];
+				Range1 = sqrt(VectDot(3, 3, dPos, dPos));
+				for (k = 0; k < 3; k++)      dPos[k] = X3[k] - derobs->P1TrState[k];
+				Range2 = sqrt(VectDot(3, 3, dPos, dPos));
 				ANO_C[n++] = derobs->DerANObs - Range1 - Range2 - derobs->AConCorr;
 			}
 		}
@@ -2644,7 +2880,7 @@ void OutputSatOrbit(SATINFO* SatAtod) {
 		fprintf(Fres, "%12.5lf %3d %2d %14.3lf %14.3lf %14.3lf %14.5lf %14.5lf %14.5lf %14.3lf %14.3lf %14.3lf %14.5lf %14.5lf %14.5lf %14.6lf %17.8lf %4d %4d %10.3lf %4d %10.1lf %6.1lf %6.1lf %6.1lf %10.3lf %10.3lf %10.3lf %10.3lf %10.3lf %10.3lf %10.3lf %10.3lf %10.3lf\n",
 			Mjd.Days + Mjd.FracDay, SatAtod->id, SatAtod->Valid, XECF[0], XECF[1], XECF[2], XECF[3], XECF[4], XECF[5],
 			XECI[0], XECI[1], XECI[2], XECI[3], XECI[4], XECI[5], Clk * 1E6, SatAtod->Clk[1] * 1E9,
-			SatAtod->edges_num, SatAtod->edges_num, SatAtod->PDOP, T.Week, T.SecOfWeek,
+			SatAtod->in_num + SatAtod->out_num, SatAtod->in_num + SatAtod->out_num, SatAtod->PDOP, T.Week, T.SecOfWeek,
 			sqrt(SatAtod->CovX[0]), sqrt(SatAtod->CovX[7]), sqrt(SatAtod->CovX[14]), SatAtod->URA,
 			SatAtod->MeanClk_apr, SatAtod->StdClk_apr, SatAtod->MeanClk_pst, SatAtod->StdClk_pst,
 			SatAtod->MeanOrb_apr, SatAtod->StdOrb_apr, SatAtod->MeanOrb_pst, SatAtod->StdOrb_pst);

@@ -5,7 +5,7 @@ TARGET := cod
 
 $(TARGET):$(objects)
 
-	$(CC) -o $(TARGET) $(objects) -lm
+	$(CC) -o $(TARGET) -g $(objects) -lm
 
 main.o:main.h
 

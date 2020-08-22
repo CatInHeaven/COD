@@ -44,7 +44,6 @@ typedef struct SCSTM
 typedef enum ANSTATEID { UNKNST, NOINIT, MANEUVER, BREAKING, ANSOK } ANSTATEID;
 typedef struct SATINFO{
 	POINT_STRUCT;
-	unsigned char index;
 	unsigned char id;
 	double Tgd[4];              // 天线的硬件延迟
 	GPSTIME TOE;             // 卫星星历的参考时间，为测距起始帧时刻的GPS时
@@ -89,7 +88,7 @@ typedef struct DERISLOMC
 }DERISLOMC;
 
 typedef struct ISLPROBS {
-	LIST_STRUCT;
+	EDGE_STRUCT;
 	short   TrScid;          // 发射信号的卫星SCID
 	short   RvScid;          // 接收信号的卫星SCID
 	short	TrAnt;
@@ -97,12 +96,12 @@ typedef struct ISLPROBS {
 	GPSTIME RvLocTime;       // 测量时刻的卫星钟的表面时
 	double  PRObs;           // 星间距离观测值
 	//unsigned short Quality;         // 观测数据的质量, 未知为0
-	int    Valid;                  // 星间伪距观测值的有效性
+	//int    Valid;                  // 星间伪距观测值的有效性
 
 	double Corr[10];     // 0: 14参数模型改正的电离层延迟, 1: 对流层改正参考值, 2: 相对论周期项改正参考值，米
 	//// 3: 固体潮改正参考值，米, 4-5:卫星天线相位中心改正参考值,对X73B [0]表示信号源，[1]:表示信号终端 ,其它均是放在[0],[1]填0;
 	//// 6-7: 卫星天线时延值,与卫星天线一致, 8-9:理论值1
-	////struct ISLPROBS* next;
+
 }ISLPROBS;
 
 typedef struct DEROBS {
@@ -111,7 +110,6 @@ typedef struct DEROBS {
 	short Scid2;       // 作为基准的参考卫星SCID与PRN号
 	short TrAnt, RvAnt;      // 发射和接收信号的天线号
 	//short I1, I2;            // I1为本星接收信号的观测值所在的索引号，I2为参考星的索引号
-	ISLPROBS *isl1, *isl2;
 	GPSTIME T1, T2;          // T1为本星测量时刻，T2为参考星的测量时刻，均为卫星钟表面时
 	double DerCObs;          // 导出的钟差观测值【m】
 	double CCObs;            // 导出的钟差观测值的计算值[m]
@@ -153,12 +151,12 @@ int SearchSatIndex(const int SID);
 int ReadSimObsData(GPSTIME* Time, ISLPROBS* islist);
 double GetPseudoRange(int tid, int w, double sec, double rpv[6], double tpv[6]);
 int OpenANSResFileDaily(GPSTIME* Time);
-int AssignEpkISLObs(GPSTIME* Time, ISLPROBS* il, ISLPROBS* EpkObs);
+int AssignEpkISLObs(GPSTIME* Time, ISLPROBS* il, SATNET* SatNet);
 void TimeUpdate(const GPSTIME* Time, SATNET* SatNet);
 void InitStateTranMatrix(int row, int col, double STM[]);
 void CompStateNoiseCov(const double Step, const ANSTATEID Valid, double Q[]);
 int GenDerPrObs(ISLPROBS* EpkObs, SATNET* SatNet);
-int GenDerObsPredict(DEROBS* derobs);
+int GenDerObsPredict(DEROBS* derobs, ISLPROBS* isl1, ISLPROBS* isl2);
 void DectectDerObsOutlier(SATNET* SatNet);
 int ScalarTimeMeasUpdate(double O_C, double sigma2, double H[], int Scale, CONSTSTATE* AllSatCov);
 int CompVectStat(const int n, const double Dat[], double* Mean, double* Std, SATINFO* SatAtod);

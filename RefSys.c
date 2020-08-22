@@ -3,6 +3,7 @@
 #include "matrix.h"
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 static double BDT_UTC = 3;        /* 2006年1月1日开始, 跳秒数[s],在上星前要设置为正确的跳秒 */
 EOPPARA EOP[3];
