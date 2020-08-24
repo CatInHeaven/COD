@@ -155,7 +155,7 @@ int AssignEpkISLObs(GPSTIME* Time, ISLPROBS* il, SATNET* SatNet);
 void TimeUpdate(const GPSTIME* Time, SATNET* SatNet);
 void InitStateTranMatrix(int row, int col, double STM[]);
 void CompStateNoiseCov(const double Step, const ANSTATEID Valid, double Q[]);
-int GenDerPrObs(ISLPROBS* EpkObs, SATNET* SatNet);
+int GenDerPrObs(SATNET* SatNet);
 int GenDerObsPredict(DEROBS* derobs, ISLPROBS* isl1, ISLPROBS* isl2);
 void DectectDerObsOutlier(SATNET* SatNet);
 int ScalarTimeMeasUpdate(double O_C, double sigma2, double H[], int Scale, CONSTSTATE* AllSatCov);

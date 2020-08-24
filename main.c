@@ -31,7 +31,7 @@ DEROBS* EpkDerObs;
 
 // simulate link data
 ISLPROBS* SimData;
-ISLPROBS* EpkISLObs;
+//ISLPROBS* EpkISLObs;
 
 int main() {
 	if (init() < 0)	return -1;
@@ -51,7 +51,7 @@ int main() {
 	// TODO memory free!
 	graph_destroy((Graph*)SatNet);
 	list_destroy((list*)SimData);
-	list_destroy((list*)EpkISLObs);
+	//list_destroy((list*)EpkISLObs);
 	fclose(FDerOrb);
 	fclose(FDerClk);
 	fclose(FPProc);
@@ -207,13 +207,13 @@ int init() {
 	Anchor[0].Tgd[0] = 0.0;
 	Anchor[0].Tgd[1] = 0.0;
 	Anchor[0].RefClkFlag = 1;
-	Anchor[0].Valid = 0;
+	Anchor[0].Valid = 1;
 
 	// read simulate data (small dataset)
 	if ((SimData = (ISLPROBS*)malloc(sizeof(ISLPROBS))) == NULL) return -1;
-	if ((EpkISLObs = (ISLPROBS*)malloc(sizeof(ISLPROBS))) == NULL) return -1;
+	//if ((EpkISLObs = (ISLPROBS*)malloc(sizeof(ISLPROBS))) == NULL) return -1;
 	list_init((list*)SimData);
-	list_init((list*)EpkISLObs);
+	//list_init((list*)EpkISLObs);
 	if (ReadSimObsData(&FrameTime, SimData) < 0) return -1;
 
 	return 0;
@@ -269,7 +269,7 @@ void run() {
 	AssignEpkISLObs(&NextFramTime, SimData, SatNet);
 
 	TimeUpdate(&NextFramTime, SatNet);
-	GenDerPrObs(EpkISLObs, SatNet);
+	GenDerPrObs(SatNet);
 
 	printf("开始进行数据预处理\n");
 	DectectDerObsOutlier(SatNet);
@@ -1170,8 +1170,8 @@ void CompStateNoiseCov(const double Step, const ANSTATEID Valid, double Q[])
 	}
 }
 
-int GenDerPrObs(ISLPROBS* EpkObs, SATNET* SatNet) {
-	int i, j, k, n, anc_id;
+int GenDerPrObs(SATNET* SatNet) {
+	int n, anc_id;
 	DEROBS* obs;
 	ISLPROBS* isl, * reisl;
 	DEROBS* EpkDerObs = (DEROBS*)SatNet->edges;
@@ -1184,9 +1184,9 @@ int GenDerPrObs(ISLPROBS* EpkObs, SATNET* SatNet) {
 	EdgeList *e_in, *e_out, *obs_el;
 	Edge *in_edge, *out_edge;
 	int flag;
-	node = SatNet->points;
-	for (i = 0; i < SatNum; i++){
-		node = (Point*)node->next;
+	
+	for (node = (Point*)SatNet->points->next; node != SatNet->points; node = (Point*)node->next) {
+
 		for (e_in = (EdgeList*)node->in_edges.next; e_in != &node->in_edges;) {
 			if (e_in->flag == 1){
 				e_in = (EdgeList*)e_in->next;
@@ -1200,7 +1200,7 @@ int GenDerPrObs(ISLPROBS* EpkObs, SATNET* SatNet) {
 					e_out = (EdgeList*)e_out->next;
 					continue;
 				}
-				
+
 				out_edge = e_out->edge;
 				if (out_edge->endpoints[0] == in_edge->endpoints[1]) {
 
@@ -1755,8 +1755,7 @@ void VerifyOutlier(SATINFO* SatAtod, DEROBS* EpkDerObs) {
 		sat = (SATINFO*)sat->next;
 		if (sat->Valid < BREAKING)  continue;
 
-		if (fabs(sat->MeanClk_apr) > 3.5 && sat->StdClk_apr < 2.0)
-		{
+		if (fabs(sat->MeanClk_apr) > 3.5 && sat->StdClk_apr < 2.0) {
 			sat->CovC[0] += fabs(sat->MeanClk_apr) * 1.0E-10;
 		}
 	}
@@ -1943,6 +1942,12 @@ void WriteDerObsResidual(SATINFO* SatAtod)
 	fflush(FDerClk);
 }
 
+void CheckSatOutlier(SATINFO* sat) {
+	sat->MeanClk_apr = sat->StdClk_apr = sat->MeanOrb_apr = sat->StdOrb_apr = 999.99;
+	if (sat->in_num + sat->out_num > 3)	CheckOutlierObs_LG3(sat);
+	else								CheckOutlierObs_LE3(sat);
+}
+
 void CheckAnchorOutlier(ANCHSTN* anc)
 {
 	int i, num;
@@ -2012,31 +2017,15 @@ void CheckAnchorOutlier(ANCHSTN* anc)
 void DectectDerObsOutlier(SATNET* SatNet)
 {
 	int i, id1, id2, k;
-	SATINFO* si;
+	Point* p;
 	DEROBS* EpkDerObs;
 	DEROBS* obs, * obs1;
 
-	si = (SATINFO*)SatNet->points;
 	EpkDerObs = (DEROBS*)SatNet->edges;
 
-	for (i = 0; i < SatNum; i++) {
-		si = (SATINFO*)si->next;
-
-		si->MeanClk_apr = si->StdClk_apr = si->MeanOrb_apr = si->StdOrb_apr = 999.99;
-		if (si->in_num + si->out_num > 3)	CheckOutlierObs_LG3(si);
-		else								CheckOutlierObs_LE3(si);
-	}
-
-	//for (i = 0; i < SatNum; i++)// 2017.05.15
-	//{
-	//	k = SearchSatIndex(Sat[i].SCID);
-	//	OrbErr[k].VS = Sat[i].ValidObsNum;
-	//}
-
-	for (i = 0; i < AncNum; i++)
-	{
-		if (Anchor[i].Valid == false)   continue;
-		CheckAnchorOutlier(Anchor + i);
+	for (p = (Point*)SatNet->points->next; p != SatNet->points; p = (Point*)p->next) {
+		if (p->type == 1) 						CheckSatOutlier((SATINFO*)p);
+		else if (((ANCHSTN*)p)->Valid == 1)		CheckAnchorOutlier((ANCHSTN*)p);
 	}
 
 	VerifyOutlier((SATINFO*)SatNet->points, EpkDerObs);
@@ -2738,7 +2727,6 @@ void ANSMeasUpdate(SATNET* SatNet) {
 			if (sat->PDOP > 5.0 || Range1 > 5.0)    sat->Health = 3;
 		}
 	}
-	printf("开始进行钟轨道测量更新\n");
 }
 
 int ScalarOrbitMeasUpdate(double O_C, double sigma2, double H[], int Scale, CONSTSTATE* AllSatCov)
