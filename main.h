@@ -131,7 +131,7 @@ typedef struct DEROBS {
 
 typedef struct SATNET {
 	GRAPH_STRUCT;
-	int ObsNum; // number of links
+	//int ObsNum; // number of links
 	CONSTSTATE AllSatCov;
 }SATNET;
 

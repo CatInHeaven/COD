@@ -1178,7 +1178,7 @@ int GenDerPrObs(SATNET* SatNet) {
 	DEROBS* EpkDerObs = (DEROBS*)SatNet->edges;
 	Point* p1, * p2;
 	
-	SatNet->ObsNum = 0;
+	//SatNet->ObsNum = 0;
 	n = 0;
 
 	Point* node;
@@ -1303,7 +1303,7 @@ int GenDerPrObs(SATNET* SatNet) {
 			else e_out = (EdgeList*)e_out->next;
 		}
 	}
-	SatNet->ObsNum = n;
+	//SatNet->ObsNum = n;
 	printf("生成导出观测值完成，共生成%d个导出观测值\n", n);
 	return true;
 }
@@ -2063,7 +2063,7 @@ void DectectDerObsOutlier(SATNET* SatNet)
 
 void ClkMeasUpdate(SATNET* SatNet)
 {
-	int	i = 0, Size = 0;
+	int	i = 0;
 
 	double	O_C = 0, R = 0, H[MAXSATNUM * 2] = { 0 }, ClkRate[MAXSATNUM] = { 0 }, rms0 = 0, rms1 = 0;
 	DEROBS* derobs;
@@ -2076,7 +2076,6 @@ void ClkMeasUpdate(SATNET* SatNet)
 	SATINFO* sat2;
 
 	sat = (SATINFO*)SatNet->points;
-	Size = SatNet->ObsNum;
 	AllSatCov = &SatNet->AllSatCov;
 	derobs = (DEROBS*)SatNet->edges;
 	for (i = 0; i < SatNum; i++) {
@@ -2094,6 +2093,7 @@ void ClkMeasUpdate(SATNET* SatNet)
 			if (anc->RefClkFlag != 1)  continue;
 			for (el = (EdgeList*)anc->in_edges.next; el != &anc->in_edges; el = (EdgeList*)el->next) {
 				derobs = (DEROBS*)el->edge;
+				if (derobs->Valid < 1)  continue;
 				sat = (SATINFO*)derobs->endpoints[1];
 				if (sat->type != 1 || sat->Valid <= NOINIT || sat->Health == 0) continue;
 				memset(H, 0, MAXSATNUM * 2 * sizeof(double));
@@ -2123,6 +2123,7 @@ void ClkMeasUpdate(SATNET* SatNet)
 			if (sat1->Valid <= NOINIT || sat1->Health == 0)    continue;
 			for (el = (EdgeList*)sat1->in_edges.next; el != &sat1->in_edges; el = (EdgeList*)el->next) {
 				derobs = (DEROBS*)el->edge;
+				if (derobs->Valid < 1)  continue;
 				if (derobs->endpoints[1]->type == 1) {
 					sat2 = (SATINFO*)derobs->endpoints[1];
 					if (sat2->Valid <= NOINIT || sat2->Health == 0)    continue;
@@ -2413,7 +2414,7 @@ int CompVectStat(const int n, const double Dat[], double* Mean, double* Std, SAT
 
 void ANSMeasUpdate(SATNET* SatNet) {
 
-	int	   i = 0, j = 0, k = 0, Size = 0, n = 0;
+	int	   i = 0, j = 0, k = 0, n = 0;
 	double dPos[DIM] = { 0 }, O_C = 0, R = 0, H1[DIM] = { 0 }, H2[DIM] = { 0 }, H3[DIM] = { 0 }, H4[DIM] = { 0 }, H_[MAXSATNUM * DIM] = { 0 };
 	double X1[DIM] = { 0 }, X2[DIM] = { 0 }, X3[DIM] = { 0 }, X4[DIM] = { 0 }, Range1 = 0, Range2 = 0;
 	double ANO_C[MAXSATNUM * MAXSATNUM] = { 0 };
@@ -2423,11 +2424,7 @@ void ANSMeasUpdate(SATNET* SatNet) {
 	SATINFO* sat2;
 	SATINFO* sat;
 	ANCHSTN* anc;
-	EdgeList* el;
 
-
-
-	Size = SatNet->ObsNum;
 	derobs = (DEROBS*)SatNet->edges;
 	AllSatCov = &SatNet->AllSatCov;
 	memset(dPos, 0, DIM * sizeof(double));
@@ -2444,159 +2441,128 @@ void ANSMeasUpdate(SATNET* SatNet) {
 
 	memset(AllSatCov->Orb, 0, MAXSATNUM * DIM * sizeof(double));
 
-	for (i = 0; i < Size; i++) {
-		derobs = (DEROBS*)derobs->next;
+	Point* p;
+	EdgeList* el;
 
-		sat1 = (SATINFO*)derobs->endpoints[0];
-		sat2 = (SATINFO*)derobs->endpoints[1];
-		if (derobs->Valid < 1)  continue;
+	for (p = (Point*)SatNet->points->next; p != SatNet->points; p = (Point*)p->next) {
+		if (p->type == 1) {
+			sat1 = (SATINFO*)p;
+			if (sat1->Valid <= NOINIT || sat1->Health == 0 || sat1->in_num + sat1->out_num < 2)    continue;
+			for (el = (EdgeList*)sat1->in_edges.next; el != &sat1->in_edges; el = (EdgeList*)el->next) {
+				derobs = (DEROBS*)el->edge;
+				if (derobs->Valid < 1)  continue;
+				if (derobs->endpoints[1]->type == 1) {
+					sat2 = (SATINFO*)derobs->endpoints[1];
+					if (sat2->Valid <= NOINIT || sat2->Health == 0 || sat2->in_num + sat2->out_num < 2)    continue;
+					memset(H_, 0, MAXSATNUM * DIM * sizeof(double));
 
-		if (sat1->type == 0 || sat2->type == 0)    continue;
+					MatrixMultiply(DIM, DIM, DIM, 1, derobs->P1RvState + 6, AllSatCov->Orb + sat1->index * DIM, X1);
+					MatrixMultiply(DIM, DIM, DIM, 1, derobs->P1TrState + 6, AllSatCov->Orb + sat1->index * DIM, X2);
+					MatrixMultiply(DIM, DIM, DIM, 1, derobs->P2RvState + 6, AllSatCov->Orb + sat2->index * DIM, X3);
+					MatrixMultiply(DIM, DIM, DIM, 1, derobs->P2TrState + 6, AllSatCov->Orb + sat2->index * DIM, X4);
 
-		if (sat1->in_num + sat1->out_num < 2 || sat2->in_num + sat2->out_num < 2)   continue;
-		if (sat1->Valid <= NOINIT || sat2->Valid <= NOINIT ||
-			sat1->Health == 0 || sat2->Health == 0)
-			continue;
+					MatrixAddition2(1, DIM, derobs->P1RvState, X1);    // X1=X1+Phi*dX
+					MatrixAddition2(1, DIM, derobs->P1TrState, X2);
+					MatrixAddition2(1, DIM, derobs->P2RvState, X3);    // X1=X1+Phi*dX
+					MatrixAddition2(1, DIM, derobs->P2TrState, X4);
+					for (j = 0; j < 3; j++)      dPos[j] = X1[j] - X4[j];
+					Range1 = sqrt(VectDot(3, 3, dPos, dPos));
+					for (j = 0; j < 3; j++)      dPos[j] = dPos[j] / Range1;
+					MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P1RvState + 6, H1);
+					for (j = 0; j < 3; j++)      dPos[j] = -1.0 * dPos[j];
+					MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P2TrState + 6, H4);
 
-		memset(H_, 0, MAXSATNUM * DIM * sizeof(double));
+					for (j = 0; j < 3; j++)      dPos[j] = X2[j] - X3[j];
+					Range2 = sqrt(VectDot(3, 3, dPos, dPos));
+					for (j = 0; j < 3; j++)      dPos[j] = dPos[j] / Range2;
+					MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P1TrState + 6, H2);
+					for (j = 0; j < 3; j++)      dPos[j] = -1.0 * dPos[j];
+					MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P2RvState + 6, H3);
 
-		MatrixMultiply(DIM, DIM, DIM, 1, derobs->P1RvState + 6, AllSatCov->Orb + sat1->index * DIM, X1);
-		MatrixMultiply(DIM, DIM, DIM, 1, derobs->P1TrState + 6, AllSatCov->Orb + sat1->index * DIM, X2);
-		MatrixMultiply(DIM, DIM, DIM, 1, derobs->P2RvState + 6, AllSatCov->Orb + sat2->index * DIM, X3);
-		MatrixMultiply(DIM, DIM, DIM, 1, derobs->P2TrState + 6, AllSatCov->Orb + sat2->index * DIM, X4);
+					for (j = 0; j < DIM; j++)
+					{
+						H_[sat1->index * DIM + j] = H1[j] + H2[j];
+						H_[sat2->index * DIM + j] = H3[j] + H4[j];
+					}
+					O_C = derobs->DerANObs - Range1 - Range2 - derobs->AConCorr;
+					R = NoiseOfISL * NoiseOfISL;
 
-		MatrixAddition2(1, DIM, derobs->P1RvState, X1);    // X1=X1+Phi*dX
-		MatrixAddition2(1, DIM, derobs->P1TrState, X2);
-		MatrixAddition2(1, DIM, derobs->P2RvState, X3);    // X1=X1+Phi*dX
-		MatrixAddition2(1, DIM, derobs->P2TrState, X4);
-		for (j = 0; j < 3; j++)      dPos[j] = X1[j] - X4[j];
-		Range1 = sqrt(VectDot(3, 3, dPos, dPos));
-		for (j = 0; j < 3; j++)      dPos[j] = dPos[j] / Range1;
-		MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P1RvState + 6, H1);
-		for (j = 0; j < 3; j++)      dPos[j] = -1.0 * dPos[j];
-		MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P2TrState + 6, H4);
+					if (ScalarOrbitMeasUpdate(O_C, R, H_, derobs->Valid, AllSatCov)) {
+						//sat1->TotalSatNum++;
+						//sat2->TotalSatNum++;
+						//if (derobs->Valid != 3)
+						//{
+						//	sat1->ValidSatNum++;
+						//	sat1->ValidSatNum++;
+						//}
+					}
+					else {
+						derobs->Valid = -1;
+			
+						printf("Orbit MeasUpdate fail: SCID %2d %6d %10.1f %10.2f %8.2f  Ref SCID: %2d\n",
+							sat1->id, sat1->TOE.Week,
+							sat1->TOE.SecOfWeek, O_C,
+							R, sat2->id);
 
-		for (j = 0; j < 3; j++)      dPos[j] = X2[j] - X3[j];
-		Range2 = sqrt(VectDot(3, 3, dPos, dPos));
-		for (j = 0; j < 3; j++)      dPos[j] = dPos[j] / Range2;
-		MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P1TrState + 6, H2);
-		for (j = 0; j < 3; j++)      dPos[j] = -1.0 * dPos[j];
-		MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P2RvState + 6, H3);
-
-		for (j = 0; j < DIM; j++)
-		{
-			H_[sat1->index * DIM + j] = H1[j] + H2[j];
-			H_[sat2->index * DIM + j] = H3[j] + H4[j];
-		}
-		O_C = derobs->DerANObs - Range1 - Range2 - derobs->AConCorr;
-		R = NoiseOfISL * NoiseOfISL;
-
-		if (ScalarOrbitMeasUpdate(O_C, R, H_, derobs->Valid, AllSatCov)) {
-			//sat1->TotalSatNum++;
-			//sat2->TotalSatNum++;
-			//if (derobs->Valid != 3)
-			//{
-			//	sat1->ValidSatNum++;
-			//	sat1->ValidSatNum++;
-			//}
-		}
-		else {
-			derobs->Valid = -1;
-  
-			printf("Orbit MeasUpdate fail: SCID %2d %6d %10.1f %10.2f %8.2f  Ref SCID: %2d\n",
-				sat1->id, sat1->TOE.Week,
-				sat1->TOE.SecOfWeek, O_C,
-				R, sat2->id);
-
-			fprintf(FPLOG, "Orbit MeasUpdate fail: SCID %2d %6d %10.1f %10.2f %8.2f  Ref SCID: %2d\n",
-				sat1->id, sat1->TOE.Week,
-				sat1->TOE.SecOfWeek, O_C,
-				R, sat2->id);
-		}
-
-	}
-
-	derobs = (DEROBS*)SatNet->edges;
-
-	for (i = 0; i < Size; i++) {
-		derobs = (DEROBS*)derobs->next;
-
-		if (derobs->Valid < 1)  continue;
-
-		if (derobs->endpoints[0]->type == 1 && derobs->endpoints[1]->type == 1)   continue;
-
-		if (derobs->endpoints[0]->type == 1) {
-			sat = (SATINFO*)derobs->endpoints[0];
-			anc = (ANCHSTN*)derobs->endpoints[1];
+						fprintf(FPLOG, "Orbit MeasUpdate fail: SCID %2d %6d %10.1f %10.2f %8.2f  Ref SCID: %2d\n",
+							sat1->id, sat1->TOE.Week,
+							sat1->TOE.SecOfWeek, O_C,
+							R, sat2->id);
+					}
+				}
+				else continue;
+			}
 		}
 		else {
-			anc = (ANCHSTN*)derobs->endpoints[0];
-			sat = (SATINFO*)derobs->endpoints[1];
-		}
+			anc = (ANCHSTN*)p;
+			if (anc->RefClkFlag != 1)  continue;
+			for (el = (EdgeList*)anc->in_edges.next; el != &anc->in_edges; el = (EdgeList*)el->next) {
+				derobs = (DEROBS*)el->edge;
+				if (derobs->Valid < 1)  continue;
+				sat = (SATINFO*)derobs->endpoints[1];
+				if (sat->type != 1 || sat->Valid <= NOINIT || sat->Health == 0 || sat->in_num + sat->out_num < 2) continue;
+				memset(dPos, 0, DIM * sizeof(double));
+				memset(H_, 0, MAXSATNUM * DIM * sizeof(double));
 
-		if (sat->in_num + sat->out_num < 2)   continue;
-		if (sat->Valid <= NOINIT || sat->Health == 0)	continue;
-		memset(dPos, 0, DIM * sizeof(double));
-		memset(H_, 0, MAXSATNUM * DIM * sizeof(double));
+				MatrixMultiply(DIM, DIM, DIM, 1, derobs->P2RvState + 6, AllSatCov->Orb + sat->index * DIM, X3);
+				MatrixMultiply(DIM, DIM, DIM, 1, derobs->P2TrState + 6, AllSatCov->Orb + sat->index * DIM, X4);
+				MatrixAddition2(1, DIM, derobs->P2RvState, X3);    // X1=X1+Phi*dX
+				MatrixAddition2(1, DIM, derobs->P2TrState, X4);
 
-		if (derobs->endpoints[0]->type == 1)
-		{
-			MatrixMultiply(DIM, DIM, DIM, 1, derobs->P1RvState + 6, AllSatCov->Orb + sat->index * DIM, X1);
-			MatrixMultiply(DIM, DIM, DIM, 1, derobs->P1TrState + 6, AllSatCov->Orb + sat->index * DIM, X2);
-			MatrixAddition2(1, DIM, derobs->P1RvState, X1);    // X1=X1+Phi*dX
-			MatrixAddition2(1, DIM, derobs->P1TrState, X2);
+				for (j = 0; j < 3; j++)      dPos[j] = X4[j] - derobs->P1RvState[j];
+				Range1 = sqrt(VectDot(3, 3, dPos, dPos));
+				for (j = 0; j < 3; j++)      dPos[j] = dPos[j] / Range1;
+				MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P2TrState + 6, H2);
 
-			for (j = 0; j < 3; j++)      dPos[j] = X1[j] - derobs->P2TrState[j];
-			Range1 = sqrt(VectDot(3, 3, dPos, dPos));
-			for (j = 0; j < 3; j++)      dPos[j] = dPos[j] / Range1;
-			MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P1RvState + 6, H1);
+				for (j = 0; j < 3; j++)      dPos[j] = X3[j] - derobs->P1TrState[j];
+				Range2 = sqrt(VectDot(3, 3, dPos, dPos));
+				for (j = 0; j < 3; j++)      dPos[j] = dPos[j] / Range2;
+				MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P2RvState + 6, H1);
 
-			for (j = 0; j < 3; j++)      dPos[j] = X2[j] - derobs->P2RvState[j];
-			Range2 = sqrt(VectDot(3, 3, dPos, dPos));
-			for (j = 0; j < 3; j++)      dPos[j] = dPos[j] / Range2;
-			MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P1TrState + 6, H2);
-		}
-		else
-		{
-			MatrixMultiply(DIM, DIM, DIM, 1, derobs->P2RvState + 6, AllSatCov->Orb + sat->index * DIM, X3);
-			MatrixMultiply(DIM, DIM, DIM, 1, derobs->P2TrState + 6, AllSatCov->Orb + sat->index * DIM, X4);
-			MatrixAddition2(1, DIM, derobs->P2RvState, X3);    // X1=X1+Phi*dX
-			MatrixAddition2(1, DIM, derobs->P2TrState, X4);
+				for (j = 0; j < DIM; j++)   H_[sat->index * DIM + j] = H1[j] + H2[j];
+				O_C = derobs->DerANObs - Range1 - Range2 - derobs->AConCorr;
+				R = NoiseOfISL * NoiseOfISL;
 
-			for (j = 0; j < 3; j++)      dPos[j] = X4[j] - derobs->P1RvState[j];
-			Range1 = sqrt(VectDot(3, 3, dPos, dPos));
-			for (j = 0; j < 3; j++)      dPos[j] = dPos[j] / Range1;
-			MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P2TrState + 6, H2);
+				if (ScalarOrbitMeasUpdate(O_C, R, H_, max((int)derobs->Valid, 2), AllSatCov)) {
+					//sat->TotalSatNum++;
+					//if (derobs->Valid != 3)  sat->ValidSatNum++;
+				}
+				else {
+					derobs->Valid = -1;
 
-			for (j = 0; j < 3; j++)      dPos[j] = X3[j] - derobs->P1TrState[j];
-			Range2 = sqrt(VectDot(3, 3, dPos, dPos));
-			for (j = 0; j < 3; j++)      dPos[j] = dPos[j] / Range2;
-			MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P2RvState + 6, H1);
-		}
+					printf("Orbit MeasUpdate fail: SCID %2d %6d %10.1f %10.2f %8.2f  Ref SCID: %2d\n",
+						sat->id, sat->TOE.Week,
+						sat->TOE.SecOfWeek, O_C,
+						R, anc->StnId);
 
-		for (j = 0; j < DIM; j++)   H_[sat->index * DIM + j] = H1[j] + H2[j];
-		O_C = derobs->DerANObs - Range1 - Range2 - derobs->AConCorr;
-		R = NoiseOfISL * NoiseOfISL;
-
-		if (ScalarOrbitMeasUpdate(O_C, R, H_, max((int)derobs->Valid, 2), AllSatCov)) {
-			//sat->TotalSatNum++;
-			//if (derobs->Valid != 3)  sat->ValidSatNum++;
-		}
-		else {
-			derobs->Valid = -1;
-
-			printf("Orbit MeasUpdate fail: SCID %2d %6d %10.1f %10.2f %8.2f  Ref SCID: %2d\n",
-				sat->id, sat->TOE.Week,
-				sat->TOE.SecOfWeek, O_C,
-				R, anc->StnId);
-
-			fprintf(FPLOG, "Orbit MeasUpdate fail: SCID %2d %6d %10.1f %10.2f %8.2f  Ref SCID: %2d\n",
-				sat->id, sat->TOE.Week,
-				sat->TOE.SecOfWeek, O_C,
-				R, anc->StnId);
+					fprintf(FPLOG, "Orbit MeasUpdate fail: SCID %2d %6d %10.1f %10.2f %8.2f  Ref SCID: %2d\n",
+						sat->id, sat->TOE.Week,
+						sat->TOE.SecOfWeek, O_C,
+						R, anc->StnId);
+				}
+			}
 		}
 	}
-
 
 	sat = (SATINFO*)SatNet->points;
 	for (i = 0; i < SatNum; i++) {
