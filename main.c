@@ -790,6 +790,7 @@ int AssignEpkISLObs(GPSTIME* Time, ISLPROBS* il, SATNET* SatNet) {
 		else {
 			break;
 		}
+		//TODO find repeat links
 	}
 	printf("读取数据成功，共读取%d条星间/星地单向链路数据\n", n);
 	return 0;
@@ -1266,7 +1267,7 @@ int GenDerPrObs(SATNET* SatNet) {
 					obs->ClkBlunder[1] = 0;
 					obs->OrbBlunder[0] = 0;
 					obs->OrbBlunder[1] = 0;
-					obs->Valid = -1;
+					obs->Valid = 0;
 					obs->endpoints[0] = isl->endpoints[0];
 					obs->endpoints[1] = isl->endpoints[1];
 					obs_el->edge = (Edge*)obs;
@@ -1569,6 +1570,25 @@ int GenDerObsPredict(DEROBS* derobs, ISLPROBS* isl1, ISLPROBS* isl2) {
 	return 1;
 }
 
+void PrintOutlierErr(DEROBS* obs) {
+	MJDTIME Mjd;
+
+	GPSTimeToMJDTime(&FrameTime, &Mjd);
+	printf("DerObs outlier: %12.5f %6d %10.1lf %3d %3d C %10.3lf %2d %2d O %10.3lf %2d %2d\n",
+		Mjd.Days + Mjd.FracDay, FrameTime.Week, FrameTime.SecOfWeek,
+		obs->Scid1, obs->Scid2,
+		obs->ObsQua.ApriClkResid, obs->ClkBlunder[0],
+		obs->ClkBlunder[1], obs->ObsQua.ApriOrbResid,
+		obs->OrbBlunder[0], obs->OrbBlunder[1]);
+
+	fprintf(FPLOG, "DerObs outlier: %12.5f %6d %10.1lf %3d %3d C %10.3lf %2d %2d O %10.3lf %2d %2d\n",
+		Mjd.Days + Mjd.FracDay, FrameTime.Week, FrameTime.SecOfWeek,
+		obs->Scid1, obs->Scid2,
+		obs->ObsQua.ApriClkResid, obs->ClkBlunder[0],
+		obs->ClkBlunder[1], obs->ObsQua.ApriOrbResid,
+		obs->OrbBlunder[0], obs->OrbBlunder[1]);
+} 
+
 void CheckOutlierObs_LG3(SATINFO* SatAtod) {
 	int i, num;
 	double MeanClk, MeanOrb, StdClk, StdOrb, StdClk1, StdOrb1;
@@ -1613,6 +1633,13 @@ void CheckOutlierObs_LG3(SATINFO* SatAtod) {
 		else								EpkDerObs->ClkBlunder[0] = 2;
 		if (fabs(ChkOrb) < 3.0 * StdOrb1)	EpkDerObs->OrbBlunder[0] = 1;
 		else								EpkDerObs->OrbBlunder[0] = 2;
+		if (EpkDerObs->ClkBlunder[0] == 1 && EpkDerObs->OrbBlunder[0] == 1) {
+			if (EpkDerObs->Valid != 3)
+				EpkDerObs->Valid = 1;
+		}
+		else if (EpkDerObs->Valid != 1){
+			EpkDerObs->Valid = -1;
+		}
 	}
 
 	for (el = (EdgeList*)SatAtod->out_edges.next; el != &SatAtod->out_edges; el = (EdgeList*)el->next) {
@@ -1624,6 +1651,13 @@ void CheckOutlierObs_LG3(SATINFO* SatAtod) {
 		else								EpkDerObs->ClkBlunder[1] = 2;
 		if (fabs(ChkOrb) < 3.0 * StdOrb1)	EpkDerObs->OrbBlunder[1] = 1;
 		else								EpkDerObs->OrbBlunder[1] = 2;
+		if (EpkDerObs->ClkBlunder[1] == 1 && EpkDerObs->OrbBlunder[1] == 1) {
+			if (EpkDerObs->Valid != 3)
+				EpkDerObs->Valid = 1;
+		}
+		else if (EpkDerObs->Valid != 1){
+			EpkDerObs->Valid = -1;
+		}
 	}
 	SatAtod->MeanClk_apr = MeanClk;
 	SatAtod->StdClk_apr = StdClk;
@@ -1700,6 +1734,13 @@ void CheckOutlierObs_LE3(SATINFO* SatAtod) {
 		else								EpkDerObs->ClkBlunder[0] = 2;
 		if (fabs(ChkOrb) < 3.0 * StdOrb)	EpkDerObs->OrbBlunder[0] = 1;
 		else								EpkDerObs->OrbBlunder[0] = 2;
+		if (EpkDerObs->ClkBlunder[0] == 1 && EpkDerObs->OrbBlunder[0] == 1) {
+			if (EpkDerObs->Valid != 3)
+				EpkDerObs->Valid = 1;
+		}
+		else if (EpkDerObs->Valid != 1){
+			EpkDerObs->Valid = -1;
+		}
 	}
 
 	for (el = (EdgeList*)SatAtod->out_edges.next; el != &SatAtod->out_edges; el = (EdgeList*)el->next) {
@@ -1711,57 +1752,14 @@ void CheckOutlierObs_LE3(SATINFO* SatAtod) {
 		else								EpkDerObs->ClkBlunder[1] = 2;
 		if (fabs(ChkOrb) < 3.0 * StdOrb)	EpkDerObs->OrbBlunder[1] = 1;
 		else								EpkDerObs->OrbBlunder[1] = 2;
-	}
-}
-
-void VerifyOutlier(SATINFO* SatAtod, DEROBS* EpkDerObs) {
-	int i;
-	MJDTIME Mjd;
-	int n = 0;
-	SATINFO* sat;
-	DEROBS* obs;
-
-	GPSTimeToMJDTime(&FrameTime, &Mjd);
-	for (obs = (DEROBS*)EpkDerObs->next; obs != EpkDerObs; obs = (DEROBS*)obs->next) {
-		if ((obs->ClkBlunder[0] == 1 && obs->OrbBlunder[0] == 1) ||
-			(obs->ClkBlunder[1] == 1 && obs->OrbBlunder[1] == 1))
-
-			obs->Valid = 1;
-		else
-		{
-			n = n + 1;
-			obs->Valid = -1;
-  
-			printf("DerObs outlier: %12.5f %6d %10.1lf %3d %3d C %10.3lf %2d %2d O %10.3lf %2d %2d\n",
-				Mjd.Days + Mjd.FracDay, FrameTime.Week, FrameTime.SecOfWeek,
-				obs->Scid1, obs->Scid2,
-				obs->ObsQua.ApriClkResid, obs->ClkBlunder[0],
-				obs->ClkBlunder[1], obs->ObsQua.ApriOrbResid,
-				obs->OrbBlunder[0], obs->OrbBlunder[1]);
-
-			fprintf(FPLOG, "DerObs outlier: %12.5f %6d %10.1lf %3d %3d C %10.3lf %2d %2d O %10.3lf %2d %2d\n",
-				Mjd.Days + Mjd.FracDay, FrameTime.Week, FrameTime.SecOfWeek,
-				obs->Scid1, obs->Scid2,
-				obs->ObsQua.ApriClkResid, obs->ClkBlunder[0],
-				obs->ClkBlunder[1], obs->ObsQua.ApriOrbResid,
-				obs->OrbBlunder[0], obs->OrbBlunder[1]);
+		if (EpkDerObs->ClkBlunder[1] == 1 && EpkDerObs->OrbBlunder[1] == 1) {
+			if (EpkDerObs->Valid != 3)
+				EpkDerObs->Valid = 1;
+		}
+		else if (EpkDerObs->Valid != 1){
+			EpkDerObs->Valid = -1;
 		}
 	}
-	fflush(FPLOG);
-
-	sat = SatAtod;
-
-	for (i = 0; i < SatNum; i++) {
-		sat = (SATINFO*)sat->next;
-		if (sat->Valid < BREAKING)  continue;
-
-		if (fabs(sat->MeanClk_apr) > 3.5 && sat->StdClk_apr < 2.0) {
-			sat->CovC[0] += fabs(sat->MeanClk_apr) * 1.0E-10;
-		}
-	}
-
-	printf("完成粗差确认，共发现%d个粗差\n", n);
-	return;
 }
 
 void WriteDerObsResidual(SATINFO* SatAtod)
@@ -1943,9 +1941,14 @@ void WriteDerObsResidual(SATINFO* SatAtod)
 }
 
 void CheckSatOutlier(SATINFO* sat) {
+
 	sat->MeanClk_apr = sat->StdClk_apr = sat->MeanOrb_apr = sat->StdOrb_apr = 999.99;
 	if (sat->in_num + sat->out_num > 3)	CheckOutlierObs_LG3(sat);
 	else								CheckOutlierObs_LE3(sat);
+
+	if (sat->Valid >= BREAKING && fabs(sat->MeanClk_apr) > 3.5 && sat->StdClk_apr < 2.0) {
+		sat->CovC[0] += fabs(sat->MeanClk_apr) * 1.0E-10;
+	}
 }
 
 void CheckAnchorOutlier(ANCHSTN* anc)
@@ -1998,7 +2001,13 @@ void CheckAnchorOutlier(ANCHSTN* anc)
 			else                           		EpkDerObs->ClkBlunder[0] = 2;
 			if (fabs(ChkOrb) < 3.0 * StdOrb1)   EpkDerObs->OrbBlunder[0] = 1;
 			else                           		EpkDerObs->OrbBlunder[0] = 2;
-
+			if (EpkDerObs->ClkBlunder[0] == 1 && EpkDerObs->OrbBlunder[0] == 1) {
+				if (EpkDerObs->Valid != 3)
+					EpkDerObs->Valid = 1;
+			}
+			else if (EpkDerObs->Valid != 1){
+				EpkDerObs->Valid = -1;
+			}
 		}
 		for (el = (EdgeList*)anc->out_edges.next ; el != &anc->out_edges; el = (EdgeList*)el->next) {
 			EpkDerObs = (DEROBS*)el->edge;
@@ -2009,7 +2018,13 @@ void CheckAnchorOutlier(ANCHSTN* anc)
 			else                           		EpkDerObs->ClkBlunder[1] = 2;
 			if (fabs(ChkOrb) < 3.0 * StdOrb1)   EpkDerObs->OrbBlunder[1] = 1;
 			else                           		EpkDerObs->OrbBlunder[1] = 2;
-
+			if (EpkDerObs->ClkBlunder[0] == 1 && EpkDerObs->OrbBlunder[0] == 1) {
+				if (EpkDerObs->Valid != 3)
+					EpkDerObs->Valid = 1;
+			}
+			else if (EpkDerObs->Valid != 1){
+				EpkDerObs->Valid = -1;
+			}
 		}
 	}
 }
@@ -2028,21 +2043,19 @@ void DectectDerObsOutlier(SATNET* SatNet)
 		else if (((ANCHSTN*)p)->Valid == 1)		CheckAnchorOutlier((ANCHSTN*)p);
 	}
 
-	VerifyOutlier((SATINFO*)SatNet->points, EpkDerObs);
+	// for (obs = (DEROBS*)EpkDerObs->next; obs != EpkDerObs; obs = (DEROBS*)obs->next) {
+	// 	if (obs->Valid != 1)   continue;
 
-	for (obs = (DEROBS*)EpkDerObs->next; obs != EpkDerObs; obs = (DEROBS*)obs->next) {
-		if (obs->Valid != 1)   continue;
+	// 	id1 = obs->Scid1;
+	// 	id2 = obs->Scid2;
+	// 	for (obs1 = (DEROBS*)obs->next; obs1 != EpkDerObs; obs1 = (DEROBS*)obs1->next) {
+	// 		if (obs1->Valid != 1)  continue;
 
-		id1 = obs->Scid1;
-		id2 = obs->Scid2;
-		for (obs1 = (DEROBS*)obs->next; obs1 != EpkDerObs; obs1 = (DEROBS*)obs1->next) {
-			if (obs1->Valid != 1)  continue;
-
-			if ((obs1->Scid1 == id1 || obs1->Scid2 == id1) && (obs1->Scid1 == id2 || obs1->Scid2 == id2)) {
-				obs->Valid = 3;
-			}
-		}
-	}
+	// 		if ((obs1->Scid1 == id1 || obs1->Scid2 == id1) && (obs1->Scid1 == id2 || obs1->Scid2 == id2)) {
+	// 			obs->Valid = 3;
+	// 		}
+	// 	}
+	// }
 
 	WriteDerObsResidual((SATINFO*)SatNet->points);
 
