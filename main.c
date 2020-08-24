@@ -2074,7 +2074,6 @@ void ClkMeasUpdate(SATNET* SatNet)
 	double  CovC[4];
 	SATINFO* sat1;
 	SATINFO* sat2;
-	EdgeList* el;
 
 	sat = (SATINFO*)SatNet->points;
 	Size = SatNet->ObsNum;
@@ -2085,93 +2084,81 @@ void ClkMeasUpdate(SATNET* SatNet)
 		if (sat->Valid > NOINIT) 	ClkRate[i] = sat->Clk[1];
 	}
 
+	Point* p;
+	EdgeList* el;
 
-	for (i = 0; i < Size; i++) {
-		derobs = (DEROBS*)derobs->next;
+	for (p = (Point*)SatNet->points->next; p != SatNet->points; p = (Point*)p->next) {
+		// anc
+		if (p->type == 0) {
+			anc = (ANCHSTN*)p;
+			if (anc->RefClkFlag != 1)  continue;
+			for (el = (EdgeList*)anc->in_edges.next; el != &anc->in_edges; el = (EdgeList*)el->next) {
+				derobs = (DEROBS*)el->edge;
+				sat = (SATINFO*)derobs->endpoints[1];
+				if (sat->type != 1 || sat->Valid <= NOINIT || sat->Health == 0) continue;
+				memset(H, 0, MAXSATNUM * 2 * sizeof(double));
+				O_C = derobs->DerCObs - derobs->CCObs - derobs->CConCorr
+					- (2.0 * AllSatCov->Clk[sat->index * 2] + AllSatCov->Clk[sat->index * 2 + 1] * derobs->ObsQua.dt[0]) * C_Light;
 
-		if (derobs->Valid < 1)  continue;
+				H[sat->index * 2 + 0] = 2.0 * C_Light;
+				H[sat->index * 2 + 1] = derobs->ObsQua.dt[0] * C_Light;
 
-		if (derobs->endpoints[0]->type == 1 && derobs->endpoints[1]->type == 1)   continue;
+				R = NoiseOfISL * NoiseOfISL;
+				if (ScalarTimeMeasUpdate(O_C, R, H, max((int)derobs->Valid, 2), AllSatCov) == false) {
 
-		if (derobs->endpoints[0]->type == 1) {
-			sat = (SATINFO*)derobs->endpoints[0];
-			anc = (ANCHSTN*)derobs->endpoints[1];
+					printf("Clock MeasUpdate fail: SCID %2d %6d %10.1f %10.2f %8.3lf  Ref SCID:%2d\n",
+						sat->id, sat->TOE.Week,
+						sat->TOE.SecOfWeek, O_C,
+						R, anc->StnId);
+
+					fprintf(FPLOG, "Clock MeasUpdate fail: SCID %2d %6d %10.1f %10.2f %8.3lf  Ref SCID:%2d\n",
+						sat->id, sat->TOE.Week,
+						sat->TOE.SecOfWeek, O_C,
+						R, anc->StnId);
+				}
+			}
 		}
 		else {
-			anc = (ANCHSTN*)derobs->endpoints[0];
-			sat = (SATINFO*)derobs->endpoints[1];
-		}
+			sat1 = (SATINFO*)p;
+			if (sat1->Valid <= NOINIT || sat1->Health == 0)    continue;
+			for (el = (EdgeList*)sat1->in_edges.next; el != &sat1->in_edges; el = (EdgeList*)el->next) {
+				derobs = (DEROBS*)el->edge;
+				if (derobs->endpoints[1]->type == 1) {
+					sat2 = (SATINFO*)derobs->endpoints[1];
+					if (sat2->Valid <= NOINIT || sat2->Health == 0)    continue;
+					memset(H, 0, sizeof(double) * MAXSATNUM * 2);
+					O_C = derobs->DerCObs - derobs->CCObs - derobs->CConCorr
+						- (2.0 * AllSatCov->Clk[sat1->index * 2] + AllSatCov->Clk[sat1->index * 2 + 1] * derobs->ObsQua.dt[0]) * C_Light
+						+ (2.0 * AllSatCov->Clk[sat2->index * 2] + AllSatCov->Clk[sat2->index * 2 + 1] * derobs->ObsQua.dt[1]) * C_Light;
 
-		if (anc->RefClkFlag != 1)  continue;
+					H[sat1->index * 2 + 0] = 2.0 * C_Light;
+					H[sat1->index * 2 + 1] = derobs->ObsQua.dt[0] * C_Light;
+					//H[id2*2+0]	= -2.0*C_Light;
+					//H[id2*2+1]	= -1.0*EpkDerObs->DerObsList[i].ObsQua.dt[1]*C_Light;
 
-		if (sat->Valid <= NOINIT || sat->Health == 0) continue;
-		memset(H, 0, MAXSATNUM * 2 * sizeof(double));
+					R = NoiseOfISL * NoiseOfISL;
+					if (ScalarTimeMeasUpdate(O_C, R, H, derobs->Valid, AllSatCov) == false)
+					{
+						derobs->Valid = -1;
 
-		O_C = derobs->DerCObs - derobs->CCObs - derobs->CConCorr
-			- (2.0 * AllSatCov->Clk[sat->index * 2] + AllSatCov->Clk[sat->index * 2 + 1] * derobs->ObsQua.dt[0]) * C_Light;
+						printf("Clock MeasUpdate fail: %2d %6d %10.1f %10.2f %8.2f  Ref SCID: %2d\n",
+							derobs->Scid1, sat1->TOE.Week,
+							sat1->TOE.SecOfWeek, O_C,
+							R, derobs->Scid2);
 
-		H[sat->index * 2 + 0] = 2.0 * C_Light;
-		H[sat->index * 2 + 1] = derobs->ObsQua.dt[0] * C_Light;
-
-		R = NoiseOfISL * NoiseOfISL;
-		if (ScalarTimeMeasUpdate(O_C, R, H, max((int)derobs->Valid, 2), AllSatCov) == false)
-		{
-			printf("Clock MeasUpdate fail: SCID %2d %6d %10.1f %10.2f %8.3lf  Ref SCID:%2d\n",
-				sat->id, sat->TOE.Week,
-				sat->TOE.SecOfWeek, O_C,
-				R, anc->StnId);
-
-			fprintf(FPLOG, "Clock MeasUpdate fail: SCID %2d %6d %10.1f %10.2f %8.3lf  Ref SCID:%2d\n",
-				sat->id, sat->TOE.Week,
-				sat->TOE.SecOfWeek, O_C,
-				R, anc->StnId);
+						fprintf(FPLOG, "Clock MeasUpdate fail: %2d %6d %10.1f %10.2f %8.2f  Ref SCID: %2d\n",
+							derobs->Scid1, sat1->TOE.Week,
+							sat1->TOE.SecOfWeek, O_C,
+							R, derobs->Scid2);
+					}
+				}
+				else continue;
+			}
 		}
 	}
 
-	derobs = EpkDerObs;
-
-	for (i = 0; i < Size; i++)
-	{
-		derobs = (DEROBS*)derobs->next;
-		sat1 = (SATINFO*)derobs->endpoints[0];
-		sat2 = (SATINFO*)derobs->endpoints[1];
-		if (derobs->Valid < 1)  continue;
-
-		if (sat1->type == 0 || sat2->type == 0)    continue;
-
-		if (sat1->Valid <= NOINIT || sat2->Valid <= NOINIT ||
-			sat1->Health == 0 || sat2->Health == 0)
-			continue;
-
-		memset(H, 0, sizeof(double) * MAXSATNUM * 2);
-		O_C = derobs->DerCObs - derobs->CCObs - derobs->CConCorr
-			- (2.0 * AllSatCov->Clk[sat1->index * 2] + AllSatCov->Clk[sat1->index * 2 + 1] * derobs->ObsQua.dt[0]) * C_Light
-			+ (2.0 * AllSatCov->Clk[sat2->index * 2] + AllSatCov->Clk[sat2->index * 2 + 1] * derobs->ObsQua.dt[1]) * C_Light;
-
-		H[sat1->index * 2 + 0] = 2.0 * C_Light;
-		H[sat1->index * 2 + 1] = derobs->ObsQua.dt[0] * C_Light;
-		//H[id2*2+0]	= -2.0*C_Light;
-		//H[id2*2+1]	= -1.0*EpkDerObs->DerObsList[i].ObsQua.dt[1]*C_Light;
-
-		R = NoiseOfISL * NoiseOfISL;
-		if (ScalarTimeMeasUpdate(O_C, R, H, derobs->Valid, AllSatCov) == false)
-		{
-			derobs->Valid = -1;
-
-			printf("Clock MeasUpdate fail: %2d %6d %10.1f %10.2f %8.2f  Ref SCID: %2d\n",
-				derobs->Scid1, sat1->TOE.Week,
-				sat1->TOE.SecOfWeek, O_C,
-				R, derobs->Scid2);
-
-			fprintf(FPLOG, "Clock MeasUpdate fail: %2d %6d %10.1f %10.2f %8.2f  Ref SCID: %2d\n",
-				derobs->Scid1, sat1->TOE.Week,
-				sat1->TOE.SecOfWeek, O_C,
-				R, derobs->Scid2);
-		}
-
-		//SatAtod[id1].State.TotalSatNum++;
-		//SatAtod[id2].State.TotalSatNum++;
-	}
+	int j, k;
+	double ANO_C[(MAXSATNUM + MAXANCHORNUM) * MAXANTENNA];
 
 	sat = (SATINFO*)SatNet->points;
 	for (i = 0; i < SatNum; i++) {
@@ -2181,7 +2168,7 @@ void ClkMeasUpdate(SATNET* SatNet)
 		CopyArray(2, sat->Clk, AllSatCov->Clk + 2 * i);
 		GetSubMatrix(SatNum * 2, SatNum * 2, 2 * i, 2 * i, 2, 2, AllSatCov->ClkCov, sat->CovC);
 
-		if (sat->Valid > NOINIT)
+		if (sat->Valid <= NOINIT)	continue;
 		{
 			sat->Clk[1] = 0.99999 * ClkRate[sat->index] + 0.00001 * sat->Clk[1];
 
@@ -2194,17 +2181,8 @@ void ClkMeasUpdate(SATNET* SatNet)
 				sat->SatClk.TotalNum++;
 			}
 		}
-	}
 
-	sat = (SATINFO*)SatNet->points;
-	int j, k;
-	double ANO_C[(MAXSATNUM + MAXANCHORNUM) * MAXANTENNA];
-	
-	for (k = 0; k < SatNum; k++)
-	{
-		sat = (SATINFO*)sat->next;
-		if (sat->Valid <= NOINIT || sat->Health == 0)
-			continue;
+		if (sat->Health == 0)	continue;
 		j = 0;
 		for (el = (EdgeList*)sat->in_edges.next; el != &sat->in_edges; el = (EdgeList*)el->next) {
 			derobs = (DEROBS*)el->edge;
@@ -2215,10 +2193,8 @@ void ClkMeasUpdate(SATNET* SatNet)
 				continue;
 
 			if (sat2->type == 1) {
-				if (sat2->Valid <= NOINIT)
-					continue;
-				if (sat2->Health == 0)
-					continue;
+				if (sat2->Valid <= NOINIT || sat2->Health == 0)		continue;
+
 				ANO_C[j] = derobs->DerCObs - derobs->CCObs - derobs->CConCorr
 					- (2.0 * sat->Clk[0] + sat->Clk[1] * derobs->ObsQua.dt[0]) * C_Light
 					+ (2.0 * sat2->Clk[0] + sat2->Clk[1] * derobs->ObsQua.dt[1]) * C_Light;
@@ -2234,20 +2210,16 @@ void ClkMeasUpdate(SATNET* SatNet)
 			if (derobs->Valid < 1)
 				continue;
 
-			if (sat == sat2 && sat1->type == 1) {
-				if (sat1->Valid <= NOINIT)
-					continue;
-				if (sat1->Health == 0)
-					continue;
+			if (sat1->type == 1) {
+				if (sat1->Valid <= NOINIT || sat1->Health == 0)		continue;
+
 				ANO_C[j] = derobs->DerCObs - derobs->CCObs - derobs->CConCorr
 					- (2.0 * sat1->Clk[0] + sat1->Clk[1] * derobs->ObsQua.dt[0]) * C_Light
 					+ (2.0 * sat->Clk[0] + sat->Clk[1] * derobs->ObsQua.dt[1]) * C_Light;
 				j++;
 			}
 		}
-	
 		CompVectStat(j, ANO_C, &(sat->MeanClk_pst), &(sat->StdClk_pst), sat);
-		
 		rms0 = sqrt(sat->MeanClk_apr * sat->MeanClk_apr + sat->StdClk_apr * sat->StdClk_apr);
 		rms1 = sqrt(sat->MeanClk_pst * sat->MeanClk_pst + sat->StdClk_pst * sat->StdClk_pst);
 
@@ -2257,9 +2229,8 @@ void ClkMeasUpdate(SATNET* SatNet)
 			CopyArray(4, sat->CovC, CovC);
 			sat->SatClk.TotalNum--;
 			if (sat->SatClk.CurNum == 0)   sat->SatClk.CurNum = MAXCLKSER - 1;
-			else                                sat->SatClk.CurNum--;
+			else                           sat->SatClk.CurNum--;
 		}
-		
 	}
 }
 
