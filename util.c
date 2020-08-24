@@ -74,8 +74,8 @@ void graph_refresh(Graph* graph) {
 	for (p = (Point*)graph->points->next; p != graph->points; p = (Point*)p->next) {
 		p->in_num = 0;
 		p->out_num = 0;
-		list_init((list*)&p->in_edges);
-		list_init((list*)&p->out_edges);
+		list_empty((list*)&p->in_edges);
+		list_empty((list*)&p->out_edges);
 	}
 	list_empty((list*)graph->edges);
 }

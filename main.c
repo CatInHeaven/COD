@@ -1058,16 +1058,17 @@ void TimeUpdate(const GPSTIME* Time, SATNET* SatNet) {
 
 		CopySubMatrix(num * 2, num * 2, i * 2, i * 2, 2, 2, P_Clk, P1_Clk);
 		CopySubMatrix(num * 2, num * 2, i * 2, i * 2, 2, 2, Q_Clk, Q1_Clk);
+
+
 		sat->Clk[0] += sat->Clk[1] * dt;
 		memcpy(AllSatCov->Clk + 2 * i, sat->Clk, sizeof(double) * 2);
 
 
 		memcpy(Stm, sat->X, sizeof(double) * 6);
 		InitStateTranMatrix(6, DIM, Stm);
-
 		OrbitSTMIntegToGivenTime(&(sat->TOE), Time, Pace, Stm);  
-
 		CopyArray(6, sat->X, Stm);
+		
 		CompStateNoiseCov(dt, sat->Valid, Q1_Orb);
 		CopySubMatrix(num * DIM, num * DIM, i * DIM, i * DIM, DIM, DIM, P_Orb, Stm + 6);
 		CopySubMatrix(num * DIM, num * DIM, i * DIM, i * DIM, DIM, DIM, Q_Orb, Q1_Orb);
@@ -1102,7 +1103,6 @@ void TimeUpdate(const GPSTIME* Time, SATNET* SatNet) {
 		sat = (SATINFO*)sat->next;
 		GetSubMatrix(num * 2, num * 2, i * 2, i * 2, 2, 2, AllSatCov->ClkCov, sat->CovC);
 		GetSubMatrix(num * DIM, num * DIM, i * DIM, i * DIM, DIM, DIM, AllSatCov->OrbCov, sat->CovX);
-
 	}
 
 	free(P_Clk);
@@ -1192,18 +1192,6 @@ int GenDerPrObs(ISLPROBS* EpkObs, SATNET* SatNet) {
 				e_in = (EdgeList*)e_in->next;
 				continue;
 			} 
-			if (e_in->flag == 2) {
-				e_in = (EdgeList*)e_in->next;
-				list_erase((list*)&node->in_edges, ((node_t*)e_in)->prev);
-				node->in_num--;
-				continue;
-			} 
-			if (e_in->reverse->flag == 1) {
-				e_in->edge = e_in->reverse->edge;
-				e_in->flag = 1;
-				e_in = (EdgeList*)e_in->next;
-				continue;
-			}
 
 			in_edge = e_in->edge;
 			flag = 0;
@@ -1212,20 +1200,37 @@ int GenDerPrObs(ISLPROBS* EpkObs, SATNET* SatNet) {
 					e_out = (EdgeList*)e_out->next;
 					continue;
 				}
-				if (e_out->flag == 2) {
-					e_out = (EdgeList*)e_out->next;
-					list_erase((list*)&node->out_edges, ((node_t*)e_out)->prev);
-					node->out_num--;
-					continue;
-				}
-				if (e_out->reverse->flag == 1) {
-					e_out->edge = e_out->reverse->edge;
-					e_out->flag = 1;
-					e_out = (EdgeList*)e_out->next;
-					continue;
-				}
+				
 				out_edge = e_out->edge;
 				if (out_edge->endpoints[0] == in_edge->endpoints[1]) {
+
+					if (e_in->reverse->flag == 1 && e_out->flag == 2) {
+						free(e_in->edge);
+						e_in->edge = e_in->reverse->edge;
+						e_in->flag = 1;
+						e_in = (EdgeList*)e_in->next;
+						free(e_out->edge);
+						e_out = (EdgeList*)e_out->next;
+						list_erase((list*)&node->out_edges, ((node_t*)e_out)->prev);
+						node->out_num--;
+						flag = 1;
+						break;
+					}
+
+					if (e_in->flag == 2 && e_out->reverse->flag == 1) {
+						free(e_in->edge);
+						e_in = (EdgeList*)e_in->next;
+						list_erase((list*)&node->in_edges, ((node_t*)e_in)->prev);
+						node->in_num--;
+						free(e_out->edge);
+						e_out->edge = e_out->reverse->edge;
+						e_out->flag = 1;
+						e_out = (EdgeList*)e_out->next;
+						flag = 1;
+						break;
+					}
+
+
 					if (GetDifGPSTime(&((ISLPROBS*)in_edge)->RvLocTime, &((ISLPROBS*)out_edge)->RvLocTime) < 0) {
 						isl = (ISLPROBS*)in_edge;
 						reisl = (ISLPROBS*)out_edge;
@@ -1278,6 +1283,7 @@ int GenDerPrObs(ISLPROBS* EpkObs, SATNET* SatNet) {
 			}
 			if (flag == 0) {
 				e_in->reverse->flag = 2;
+				free(e_in->edge);
 				e_in = (EdgeList*)e_in->next;
 				list_erase((list*)&node->in_edges, ((node_t*)e_in)->prev);
 				node->in_num--;
@@ -1288,6 +1294,7 @@ int GenDerPrObs(ISLPROBS* EpkObs, SATNET* SatNet) {
 			out_edge = e_out->edge;
 			if (e_out->flag == 0) {
 				e_out->reverse->flag = 2;
+				free(e_out->edge);
 				e_out = (EdgeList*)e_out->next;
 				list_erase((list*)&node->out_edges,(node_t*)e_out->prev);
 				node->out_num--;
@@ -2445,7 +2452,7 @@ void ANSMeasUpdate(SATNET* SatNet) {
 	ANCHSTN* anc;
 	EdgeList* el;
 
-	printf("开始进行钟轨道测量更新\n");
+
 
 	Size = SatNet->ObsNum;
 	derobs = (DEROBS*)SatNet->edges;
@@ -2731,6 +2738,7 @@ void ANSMeasUpdate(SATNET* SatNet) {
 			if (sat->PDOP > 5.0 || Range1 > 5.0)    sat->Health = 3;
 		}
 	}
+	printf("开始进行钟轨道测量更新\n");
 }
 
 int ScalarOrbitMeasUpdate(double O_C, double sigma2, double H[], int Scale, CONSTSTATE* AllSatCov)
