@@ -158,7 +158,7 @@ void CompStateNoiseCov(const double Step, const ANSTATEID Valid, double Q[]);
 int GenDerPrObs(SATNET* SatNet);
 int GenDerObsPredict(DEROBS* derobs, ISLPROBS* isl1, ISLPROBS* isl2);
 void DectectDerObsOutlier(SATNET* SatNet);
-int ScalarTimeMeasUpdate(double O_C, double sigma2, double H[], int Scale, CONSTSTATE* AllSatCov);
+int ScalarTimeMeasUpdate(double O_C, double sigma2, double H[], int Scale, double ClkCov[], double Clk[]);
 int CompVectStat(const int n, const double Dat[], double* Mean, double* Std, SATINFO* SatAtod);
 void ClkMeasUpdate(SATNET* SatNet);
 int ScalarOrbitMeasUpdate(double O_C, double sigma2, double H[], int Scale, CONSTSTATE* AllSatCov);

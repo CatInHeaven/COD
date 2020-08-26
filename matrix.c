@@ -209,7 +209,7 @@ void MatrixMultiply_MPMT(int m, int n, const double M[], const double P[], doubl
 {
 	int i, j, k;
 	double Sum;
-	double* Temp;    // ����ʹ�ö�̬���䣬��������Ϊ����������ά��
+	double* Temp;
 
 	if (m < 1 || n < 1)
 	{
@@ -281,7 +281,6 @@ int MatrixInv(int n, double a[], double b[])
 		return 0;
 	}
 
-	/* ���������ֵ���������b�������b�������棬a���󲻱� */
 	for (i = 0; i < n; i++)
 	{
 		for (j = 0; j < n; j++)
@@ -293,7 +292,7 @@ int MatrixInv(int n, double a[], double b[])
 	for (k = 0; k < n; k++)
 	{
 		d = 0.0;
-		for (i = k; i < n; i++)   /* �������½Ƿ�������Ԫ�ص�λ�� */
+		for (i = k; i < n; i++) 
 		{
 			for (j = k; j < n; j++)
 			{
@@ -308,13 +307,13 @@ int MatrixInv(int n, double a[], double b[])
 			}
 		}
 
-		if (d < 0.0)   /* ��Ԫ�ؽӽ���0�����󲻿��� */
+		if (d < 0.0)
 		{
 			printf("MatrixInv fail!\n");
 			return 0;
 		}
 
-		if (is[k] != k)  /* ����Ԫ�����ڵ��������½Ƿ�������н��е��� */
+		if (is[k] != k)
 		{
 			for (j = 0; j < n; j++)
 			{
@@ -326,7 +325,7 @@ int MatrixInv(int n, double a[], double b[])
 			}
 		}
 
-		if (js[k] != k)  /* ����Ԫ�����ڵ��������½Ƿ�������н��е��� */
+		if (js[k] != k) 
 		{
 			for (i = 0; i < n; i++)
 			{
@@ -339,7 +338,7 @@ int MatrixInv(int n, double a[], double b[])
 		}
 
 		l = k * n + k;
-		b[l] = 1.0 / b[l];  /* �����б任 */
+		b[l] = 1.0 / b[l]; 
 		for (j = 0; j < n; j++)
 		{
 			if (j != k)
@@ -372,7 +371,7 @@ int MatrixInv(int n, double a[], double b[])
 		}
 	}
 
-	for (k = n - 1; k >= 0; k--)  /* ����������е������»ָ� */
+	for (k = n - 1; k >= 0; k--)
 	{
 		if (js[k] != k)
 		{
