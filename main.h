@@ -18,9 +18,10 @@
 #define C_Light 299792458.0      /* Speed of light  [m/s]; IAU 1976  */
 
 // structure definition 
-typedef struct CONSTSTATE{
-	double	Clk[MAXSATNUM * 2], ClkCov[MAXSATNUM * MAXSATNUM * 4];
-	double	Orb[MAXSATNUM * DIM], OrbCov[MAXSATNUM * MAXSATNUM * DIM * DIM];
+typedef struct CONSTSTATE {
+	double	Clk[MAXSATNUM * 2];
+	double	Orb[MAXSATNUM * DIM];
+	SpraseMatrix* ClkCov, * OrbCov;
 }CONSTSTATE;
 
 #define MAXCLKSER 40                    // 最大钟差拟合的序列元素
@@ -158,10 +159,10 @@ void CompStateNoiseCov(const double Step, const ANSTATEID Valid, double Q[]);
 int GenDerPrObs(SATNET* SatNet);
 int GenDerObsPredict(DEROBS* derobs, ISLPROBS* isl1, ISLPROBS* isl2);
 void DectectDerObsOutlier(SATNET* SatNet);
-int ScalarTimeMeasUpdate(double O_C, double sigma2, double H[], int Scale, double ClkCov[], double Clk[]);
+int ScalarTimeMeasUpdate(double O_C, double sigma2, SpraseMatrix* H, int Scale, CONSTSTATE* AllSatCov);
 int CompVectStat(const int n, const double Dat[], double* Mean, double* Std, SATINFO* SatAtod);
 void ClkMeasUpdate(SATNET* SatNet);
-int ScalarOrbitMeasUpdate(double O_C, double sigma2, double H[], int Scale, CONSTSTATE* AllSatCov);
+int ScalarOrbitMeasUpdate(double O_C, double sigma2, SpraseMatrix* H, int Scale, CONSTSTATE* AllSatCov);
 void ANSMeasUpdate(SATNET* SatNet);
 void OutputSatOrbit(SATINFO* SatAtod);
 

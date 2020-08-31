@@ -40,7 +40,7 @@ int main() {
 	struct timeval tv_end;
 	double dDuration;
 	gettimeofday(&tv_begin, NULL);
-	while (n < 1) {
+	while (n < 10) {
 		run();
 		printf("%4d %10.1f\n", FrameTime.Week, FrameTime.SecOfWeek);
 		n++;
@@ -49,9 +49,10 @@ int main() {
 	dDuration = 1000 * (tv_end.tv_sec - tv_begin.tv_sec) + ((tv_end.tv_usec - tv_begin.tv_usec) / 1000.0);
 	printf("Duration: %f ms\n",dDuration);
 	// TODO memory free!
+	DestroySpraseMatrix(SatNet->AllSatCov.ClkCov);
+	DestroySpraseMatrix(SatNet->AllSatCov.OrbCov);
 	graph_destroy((Graph*)SatNet);
 	list_destroy((list*)SimData);
-	//list_destroy((list*)EpkISLObs);
 	fclose(FDerOrb);
 	fclose(FDerClk);
 	fclose(FPProc);
@@ -157,9 +158,12 @@ int init() {
 	CONSTSTATE* AllSatCov;
 	AllSatCov = &SatNet->AllSatCov;
 	memset(AllSatCov->Clk, 0, sizeof(double) * MAXSATNUM * 2);
-	memset(AllSatCov->ClkCov, 0, sizeof(double) * MAXSATNUM * MAXSATNUM * 4);
 	memset(AllSatCov->Orb, 0, sizeof(double) * MAXSATNUM * DIM);
-	memset(AllSatCov->OrbCov, 0, sizeof(double) * MAXSATNUM * MAXSATNUM * DIM * DIM);
+	AllSatCov->ClkCov = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
+	AllSatCov->OrbCov = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
+	CreateSpraseMatrix(AllSatCov->ClkCov, SatNet->points_num, SatNet->points_num, 2, 2);
+	CreateSpraseMatrix(AllSatCov->OrbCov, SatNet->points_num, SatNet->points_num, DIM, DIM);
+	
 
 	double x[DIM];
 	double clk[2];
@@ -189,8 +193,8 @@ int init() {
 		for (i = 3; i < 6; i++)      p->CovX[i * (DIM + 1)] = pow(SigmaVel, 2.0);
 
 		CopyArray(2, AllSatCov->Clk + 2 * p->index, p->Clk);
-		CopySubMatrix(SatNum* DIM, SatNum* DIM, p->index * DIM, p->index * DIM, DIM, DIM, AllSatCov->OrbCov, p->CovX);
-		CopySubMatrix(SatNum * 2, SatNum * 2, p->index * 2, p->index * 2, 2, 2, AllSatCov->ClkCov, p->CovC);
+		CopySubSpraseMatrix(AllSatCov->OrbCov, p->index, p->index, DIM, DIM, p->CovX);
+		CopySubSpraseMatrix(AllSatCov->ClkCov, p->index, p->index, 2, 2, p->CovC);
 	}
 
 	fclose(Frin);
@@ -268,28 +272,28 @@ void run() {
 	// add link to Satellite Network
 	AssignEpkISLObs(&NextFramTime, SimData, SatNet);
 
-	// TimeUpdate(&NextFramTime, SatNet);
-	// GenDerPrObs(SatNet);
+	TimeUpdate(&NextFramTime, SatNet);
+	GenDerPrObs(SatNet);
 
-	// printf("开始进行数据预处理\n");
-	// DectectDerObsOutlier(SatNet);
-	// printf("数据预处理结束\n");
+	printf("开始进行数据预处理\n");
+	DectectDerObsOutlier(SatNet);
+	printf("数据预处理结束\n");
 
-	// printf("开始进行钟差测量更新\n");
-	// ClkMeasUpdate(SatNet);
-	// printf("完成钟差测量更新\n");
+	printf("开始进行钟差测量更新\n");
+	ClkMeasUpdate(SatNet);
+	printf("完成钟差测量更新\n");
 
-	// printf("开始进行钟轨道测量更新\n");
-	// ANSMeasUpdate(SatNet);
-	// printf("完成轨道测量更新\n");
+	printf("开始进行钟轨道测量更新\n");
+	ANSMeasUpdate(SatNet);
+	printf("完成轨道测量更新\n");
 
-	// SATINFO* sat;
-	// sat = (SATINFO*)SatNet->points;
-	// for (i = 0; i < SatNum; i++) {
-	// 	sat = (SATINFO*)sat->next;
-	// 	if (sat->Valid <= NOINIT)   continue;
-	// 	OutputSatOrbit(sat);
-	// }
+	SATINFO* sat;
+	sat = (SATINFO*)SatNet->points;
+	for (i = 0; i < SatNum; i++) {
+		sat = (SATINFO*)sat->next;
+		if (sat->Valid <= NOINIT)   continue;
+		OutputSatOrbit(sat);
+	}
 
 	FrameTime.Week = NextFramTime.Week;
 	FrameTime.SecOfWeek = NextFramTime.SecOfWeek;
@@ -1009,9 +1013,9 @@ void TimeUpdate(const GPSTIME* Time, SATNET* SatNet) {
 	SATINFO* sat;
 	CONSTSTATE* AllSatCov;
 	double dt, Stm[Dim_STM], q;
-	double* P_Clk, * P_Orb;
-	double* Q_Clk, * Q_Orb;
-	double* Cov_Clk, * Cov_Orb;
+	SpraseMatrix *P_Clk, *P_Orb;
+	SpraseMatrix *Q_Clk, *Q_Orb;
+	SpraseMatrix *Cov_Clk, *Cov_Orb;
 	double P1_Clk[4];
 	double Q1_Clk[4];
 	double Q1_Orb[DIM * DIM];
@@ -1021,19 +1025,19 @@ void TimeUpdate(const GPSTIME* Time, SATNET* SatNet) {
 
 	int num = SatNum;
 	AllSatCov = &SatNet->AllSatCov;
-	P_Clk = (double*)malloc(sizeof(double) * num * 2 * num * 2);
-	Q_Clk = (double*)malloc(sizeof(double) * num * 2 * num * 2);
-	Cov_Clk = (double*)malloc(sizeof(double) * num * 2 * num * 2);
-	P_Orb = (double*)malloc(sizeof(double) * num * DIM * num * DIM);
-	Q_Orb = (double*)malloc(sizeof(double) * num * DIM * num * DIM);
-	Cov_Orb = (double*)malloc(sizeof(double) * num * DIM * num * DIM);
+	P_Clk = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
+	Q_Clk = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
+	Cov_Clk = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
+	P_Orb = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
+	Q_Orb = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
+	Cov_Orb = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
 
-	memset(P_Clk, 0, sizeof(double) * num * 2 * num * 2);
-	memset(Q_Clk, 0, sizeof(double) * num * 2 * num * 2);
-	memset(Cov_Clk, 0, sizeof(double) * num * 2 * num * 2);
-	memset(P_Orb, 0, sizeof(double) * num * DIM * num * DIM);
-	memset(Q_Orb, 0, sizeof(double) * num * DIM * num * DIM);
-	memset(Cov_Orb, 0, sizeof(double) * num * DIM * num * DIM);
+	CreateSpraseMatrix(P_Clk, num, num, 2, 2);
+	CreateSpraseMatrix(Q_Clk, num, num, 2, 2);
+	CreateSpraseMatrix(Cov_Clk, num, num, 2, 2);
+	CreateSpraseMatrix(P_Orb, num, num, DIM, DIM);
+	CreateSpraseMatrix(Q_Orb, num, num, DIM, DIM);
+	CreateSpraseMatrix(Cov_Orb, num, num, DIM, DIM);
 
 	sat = (SATINFO*)SatNet->points;
 	for (i = 0; i < num; i++) {
@@ -1057,8 +1061,8 @@ void TimeUpdate(const GPSTIME* Time, SATNET* SatNet) {
 		P1_Clk[1] = dt;
 		P1_Clk[2] = 0.0;
 
-		CopySubMatrix(num * 2, num * 2, i * 2, i * 2, 2, 2, P_Clk, P1_Clk);
-		CopySubMatrix(num * 2, num * 2, i * 2, i * 2, 2, 2, Q_Clk, Q1_Clk);
+		CopySubSpraseMatrix(P_Clk, i, i, 2, 2, P1_Clk);
+		CopySubSpraseMatrix(Q_Clk, i, i, 2, 2, Q1_Clk);
 
 
 		sat->Clk[0] += sat->Clk[1] * dt;
@@ -1071,8 +1075,9 @@ void TimeUpdate(const GPSTIME* Time, SATNET* SatNet) {
 		CopyArray(6, sat->X, Stm);
 		
 		CompStateNoiseCov(dt, sat->Valid, Q1_Orb);
-		CopySubMatrix(num * DIM, num * DIM, i * DIM, i * DIM, DIM, DIM, P_Orb, Stm + 6);
-		CopySubMatrix(num * DIM, num * DIM, i * DIM, i * DIM, DIM, DIM, Q_Orb, Q1_Orb);
+
+		CopySubSpraseMatrix(P_Orb, i, i, DIM, DIM, Stm + 6);
+		CopySubSpraseMatrix(Q_Orb, i, i, DIM, DIM, Q1_Orb);
 
 		InitStateTranMatrix(6, DIM, Stm);
 		RKF4OrbitSTMForInterp(Time, PredPace, Stm, sat->STM);
@@ -1094,24 +1099,24 @@ void TimeUpdate(const GPSTIME* Time, SATNET* SatNet) {
 		}
 	}
 
-	MatrixMultiply_MPMT(num * 2, num * 2, P_Clk, AllSatCov->ClkCov, Cov_Clk);  // M*P*MT+Q
-	MatrixAddition(num * 2, num * 2, Cov_Clk, Q_Clk, AllSatCov->ClkCov);
-	MatrixMultiply_MPMT(num * DIM, num * DIM, P_Orb, AllSatCov->OrbCov, Cov_Orb);
-	MatrixAddition(num * DIM, num * DIM, Cov_Orb, Q_Orb, AllSatCov->OrbCov);
+	SpraseMatrixMultiply_MPMT(P_Clk, AllSatCov->ClkCov, Cov_Clk);  // M*P*MT+Q
+	SpraseMatrixAddition(Cov_Clk, Q_Clk, AllSatCov->ClkCov);
+	SpraseMatrixMultiply_MPMT(P_Orb, AllSatCov->OrbCov, Cov_Orb);
+	SpraseMatrixAddition(Cov_Orb, Q_Orb, AllSatCov->OrbCov);
 
 	sat = (SATINFO*)SatNet->points;
 	for (i = 0; i < num; i++) {
 		sat = (SATINFO*)sat->next;
-		GetSubMatrix(num * 2, num * 2, i * 2, i * 2, 2, 2, AllSatCov->ClkCov, sat->CovC);
-		GetSubMatrix(num * DIM, num * DIM, i * DIM, i * DIM, DIM, DIM, AllSatCov->OrbCov, sat->CovX);
+		GetSubSpraseMatrix(AllSatCov->ClkCov, i, i, 2, 2, sat->CovC);
+		GetSubSpraseMatrix(AllSatCov->OrbCov, i, i, DIM, DIM, sat->CovX);
 	}
 
-	free(P_Clk);
-	free(P_Orb);
-	free(Q_Clk);
-	free(Q_Orb);
-	free(Cov_Clk);
-	free(Cov_Orb);
+	DestroySpraseMatrix(P_Clk);
+	DestroySpraseMatrix(P_Orb);
+	DestroySpraseMatrix(Q_Clk);
+	DestroySpraseMatrix(Q_Orb);
+	DestroySpraseMatrix(Cov_Clk);
+	DestroySpraseMatrix(Cov_Orb);
 
 	printf("完成时间更新\n");
 }
@@ -2027,6 +2032,8 @@ void CheckAnchorOutlier(ANCHSTN* anc)
 			}
 		}
 	}
+	free(CO_C);
+	free(ANO_C);
 }
 
 void DectectDerObsOutlier(SATNET* SatNet)
@@ -2063,7 +2070,7 @@ void DectectDerObsOutlier(SATNET* SatNet)
 
 void ClkMeasUpdate(SATNET* SatNet) {
 	int i;
-	double	O_C = 0, R = 0, H[2], ClkCov[4], ClkRate[MAXSATNUM] = { 0 }, rms0 = 0, rms1 = 0;
+	double	O_C = 0, R = 0, ClkRate[MAXSATNUM] = { 0 }, rms0 = 0, rms1 = 0;
 	DEROBS* derobs;
 	CONSTSTATE* AllSatCov;
 	SATINFO* sat;
@@ -2084,6 +2091,12 @@ void ClkMeasUpdate(SATNET* SatNet) {
 	Point* p;
 	EdgeList* el;
 
+	SpraseMatrix* H;
+	H = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
+	CreateSpraseMatrix(H, SatNum, 1, 2, 1);
+
+	double H_sub[2];
+
 	for (p = (Point*)SatNet->points->next; p != SatNet->points; p = (Point*)p->next) {
 		// anc
 		if (p->type == 0) {
@@ -2094,18 +2107,17 @@ void ClkMeasUpdate(SATNET* SatNet) {
 				if (derobs->Valid < 1)  continue;
 				sat = (SATINFO*)derobs->endpoints[1];
 				if (sat->type != 1 || sat->Valid <= NOINIT || sat->Health == 0) continue;
-				memset(H, 0, 2 * sizeof(double));
+				EmptySpraseMatrix(H);
 				O_C = derobs->DerCObs - derobs->CCObs - derobs->CConCorr
 					- (2.0 * AllSatCov->Clk[sat->index * 2] + AllSatCov->Clk[sat->index * 2 + 1] * derobs->ObsQua.dt[0]) * C_Light;
 
-				H[0] = 2.0 * C_Light;
-				H[1] = derobs->ObsQua.dt[0] * C_Light;
+				H_sub[0] = 2.0 * C_Light;
+				H_sub[1] = derobs->ObsQua.dt[0] * C_Light;
+				CopySubSpraseMatrix(H, sat->index, 0, 2, 1, H_sub);
 
 				R = NoiseOfISL * NoiseOfISL;
 
-				GetSubMatrix(SatNum * 2, SatNum * 2, sat->index * 2, sat->index * 2, 2, 2, AllSatCov->ClkCov, ClkCov);
-
-				if (ScalarTimeMeasUpdate(O_C, R, H, max((int)derobs->Valid, 2), ClkCov, AllSatCov->Clk + sat->index * 2) == false) {
+				if (ScalarTimeMeasUpdate(O_C, R, H, max((int)derobs->Valid, 2), AllSatCov) == false) {
 
 					printf("Clock MeasUpdate fail: SCID %2d %6d %10.1f %10.2f %8.3lf  Ref SCID:%2d\n",
 						sat->id, sat->TOE.Week,
@@ -2117,8 +2129,6 @@ void ClkMeasUpdate(SATNET* SatNet) {
 						sat->TOE.SecOfWeek, O_C,
 						R, anc->StnId);
 				}
-
-				CopySubMatrix(SatNum * 2, SatNum * 2, sat->index * 2, sat->index * 2, 2, 2, AllSatCov->ClkCov, ClkCov);
 			}
 		}
 		else {
@@ -2128,23 +2138,22 @@ void ClkMeasUpdate(SATNET* SatNet) {
 				derobs = (DEROBS*)el->edge;
 				if (derobs->Valid < 1)  continue;
 				if (derobs->endpoints[1]->type == 1) {
+					EmptySpraseMatrix(H);
 					sat2 = (SATINFO*)derobs->endpoints[1];
 					if (sat2->Valid <= NOINIT || sat2->Health == 0)    continue;
-					memset(H, 0, sizeof(double) * 2);
 					O_C = derobs->DerCObs - derobs->CCObs - derobs->CConCorr
 						- (2.0 * AllSatCov->Clk[sat1->index * 2] + AllSatCov->Clk[sat1->index * 2 + 1] * derobs->ObsQua.dt[0]) * C_Light
 						+ (2.0 * AllSatCov->Clk[sat2->index * 2] + AllSatCov->Clk[sat2->index * 2 + 1] * derobs->ObsQua.dt[1]) * C_Light;
 
-					H[0] = 2.0 * C_Light;
-					H[1] = derobs->ObsQua.dt[0] * C_Light;
+					H_sub[0] = 2.0 * C_Light;
+					H_sub[1] = derobs->ObsQua.dt[0] * C_Light;
+					CopySubSpraseMatrix(H, sat1->index, 0, 2, 1, H_sub);
 					//H[id2*2+0]	= -2.0*C_Light;
 					//H[id2*2+1]	= -1.0*EpkDerObs->DerObsList[i].ObsQua.dt[1]*C_Light;
 
 					R = NoiseOfISL * NoiseOfISL;
 
-					GetSubMatrix(SatNum * 2, SatNum * 2, sat1->index * 2, sat1->index * 2, 2, 2, AllSatCov->ClkCov, ClkCov);
-
-					if (ScalarTimeMeasUpdate(O_C, R, H, derobs->Valid, ClkCov, AllSatCov->Clk + sat1->index * 2) == false)
+					if (ScalarTimeMeasUpdate(O_C, R, H, derobs->Valid, AllSatCov) == false)
 					{
 						derobs->Valid = -1;
 
@@ -2158,12 +2167,13 @@ void ClkMeasUpdate(SATNET* SatNet) {
 							sat1->TOE.SecOfWeek, O_C,
 							R, derobs->Scid2);
 					}
-					CopySubMatrix(SatNum * 2, SatNum * 2, sat1->index * 2, sat1->index * 2, 2, 2, AllSatCov->ClkCov, ClkCov);
 				}
 				else continue;
 			}
 		}
 	}
+
+	DestroySpraseMatrix(H);
 
 	int j, k;
 	double ANO_C[(MAXSATNUM + MAXANCHORNUM) * MAXANTENNA];
@@ -2174,7 +2184,7 @@ void ClkMeasUpdate(SATNET* SatNet) {
 		memcpy(Clk, sat->Clk, 2 * sizeof(double));
 		memcpy(CovC, sat->CovC, 4 * sizeof(double));
 		CopyArray(2, sat->Clk, AllSatCov->Clk + 2 * i);
-		GetSubMatrix(SatNum * 2, SatNum * 2, 2 * i, 2 * i, 2, 2, AllSatCov->ClkCov, sat->CovC);
+		GetSubSpraseMatrix(AllSatCov->ClkCov, i, i, 2, 2, sat->CovC);
 
 		if (sat->Valid <= NOINIT)	continue;
 		{
@@ -2208,7 +2218,7 @@ void ClkMeasUpdate(SATNET* SatNet) {
 					+ (2.0 * sat2->Clk[0] + sat2->Clk[1] * derobs->ObsQua.dt[1]) * C_Light;
 				j++;
 			}
-			
+
 		}
 		for (el = (EdgeList*)sat->out_edges.next; el != &sat->out_edges; el = (EdgeList*)el->next) {
 			derobs = (DEROBS*)el->edge;
@@ -2261,47 +2271,68 @@ void Dyadic(int m, int n, const double A[], const double B[], double Mat[])
 	}
 }
 
-int ScalarTimeMeasUpdate(double O_C, double sigma2, double H[], int Scale, double ClkCov[], double Clk[])
+int ScalarTimeMeasUpdate(double O_C, double sigma2, SpraseMatrix* H, int Scale, CONSTSTATE* AllSatCov)
 {
 	int	i, j;
 	double	Error;
-	double	K[2], TmpMat[2], Mat[4], Cov[4];
 
-	memset(K, 0, 2 * sizeof(double));
-	memset(TmpMat, 0, 2 * sizeof(double));
-	memset(Mat, 0, 4 * sizeof(double));
-	memset(Cov, 0, 4 * sizeof(double));
-
-	MatrixMultiply(2, 2, 2, 1, ClkCov, H, TmpMat);
-	Error = sigma2 + VectDot(2, 2, H, TmpMat);
+	SpraseMatrix *TmpMat, *K, *Mat, *Cov;
+	TmpMat = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
+	K = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
+	Mat = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
+	Cov = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
+	CreateSpraseMatrix(TmpMat, SatNum, 1, 2, 1);
+	CreateSpraseMatrix(K, SatNum, 1, 2, 1);
+	CreateSpraseMatrix(Mat, SatNum,	SatNum, 2, 2);
+	CreateSpraseMatrix(Cov, SatNum, SatNum, 2, 2);
+	
+	SpraseMatrixMultiply(AllSatCov->ClkCov, H, TmpMat);
+	Error = sigma2 + SpraseVectDot(H, TmpMat);
 
 	if ((Scale == 1 || Scale == 3) && fabs(O_C) / Error > 3.0) {
 		return false;
 	}
 
-	for (i = 0; i < 2; i++) {
-		K[i] = TmpMat[i] / Error;
-	}
-
-	for (i = 0; i < 2; i++) {
-		Clk[i] = Clk[i] + K[i] * O_C;
-	}
-
 	if (Scale == 3)  return true;
 
-	Dyadic(2, 2, K, H, Mat);
-
-	for (i = 0; i < 2; i++) {
-		for (j = 0; j < 2; j++) {
-			*(Mat + i * 2 + j) = -1.0 * *(Mat + i * 2 + j);
-			if (i == j) {
-				*(Mat + i * 2 + j) = *(Mat + i * 2 + j) + 1.0;
-			}
-		}
+	SpraseMatrixNode* p;
+	double buff[2];
+	p = TmpMat->chead[0].down;
+	while (p != NULL) {
+		buff[0] = *(p->submatrix) / Error;
+		buff[1] = *(p->submatrix + 1) / Error;
+		CopySubSpraseMatrix(K, p->i, p->j, 2, 1, buff);
+		AllSatCov->Clk[p->i * 2] += buff[0] * O_C;
+		AllSatCov->Clk[p->i * 2 + 1] += buff[1] * O_C;
+		p = p->down;
 	}
 
-	MatrixMultiply(2, 2, 2, 2, Mat, ClkCov, Cov);
-	CopyArray(4, ClkCov, Cov);
+	double* buff_;
+	SpraseMatrixNode* pa, * pb;
+
+	buff_ = (double*)malloc(sizeof(double) * 2 * 2);
+	pa = K->chead[0].down;
+	while (pa != NULL) {
+		pb = H->chead[0].down;
+		while (pb != NULL) {
+			Dyadic(2, 2, pa->submatrix, pb->submatrix, buff_);
+			for (i = 0; i < 2; i++) {
+				for (j = 0; j < 2; j++) {
+					*(buff_ + i * 2 + j) = 0 - *(buff_ + i * 2 + j);
+				}
+			}
+			CopySubSpraseMatrix(Mat, pa->i, pb->i, 2, 2, buff_);
+			pb = pb->down;
+		}
+		pa = pa->down;
+	}
+	free(buff_);
+	SpraseMatrixMultiply(Mat, AllSatCov->ClkCov, Cov);
+	SpraseMatrixAddition1(Cov, AllSatCov->ClkCov);
+	DestroySpraseMatrix(Cov);
+	DestroySpraseMatrix(TmpMat);
+	DestroySpraseMatrix(K);
+	DestroySpraseMatrix(Mat);
 
 	return true;
 }
@@ -2414,9 +2445,9 @@ int CompVectStat(const int n, const double Dat[], double* Mean, double* Std, SAT
 void ANSMeasUpdate(SATNET* SatNet) {
 
 	int	   i = 0, j = 0, k = 0, n = 0;
-	double dPos[DIM] = { 0 }, O_C = 0, R = 0, H1[DIM] = { 0 }, H2[DIM] = { 0 }, H3[DIM] = { 0 }, H4[DIM] = { 0 }, H_[MAXSATNUM * DIM] = { 0 };
-	double X1[DIM] = { 0 }, X2[DIM] = { 0 }, X3[DIM] = { 0 }, X4[DIM] = { 0 }, Range1 = 0, Range2 = 0;
-	double ANO_C[MAXSATNUM * MAXSATNUM] = { 0 };
+	double dPos[DIM], O_C = 0, R = 0, H1[DIM], H2[DIM], H3[DIM], H4[DIM], H_[DIM];
+	double X1[DIM], X2[DIM], X3[DIM], X4[DIM], Range1 = 0, Range2 = 0;
+	double ANO_C[MAXSATNUM * MAXSATNUM];
 	DEROBS* derobs;
 	CONSTSTATE* AllSatCov;
 	SATINFO* sat1;
@@ -2443,6 +2474,10 @@ void ANSMeasUpdate(SATNET* SatNet) {
 	Point* p;
 	EdgeList* el;
 
+	SpraseMatrix* H;
+	H = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
+	CreateSpraseMatrix(H, SatNum, 1, DIM, 1);
+
 	for (p = (Point*)SatNet->points->next; p != SatNet->points; p = (Point*)p->next) {
 		if (p->type == 1) {
 			sat1 = (SATINFO*)p;
@@ -2453,7 +2488,9 @@ void ANSMeasUpdate(SATNET* SatNet) {
 				if (derobs->endpoints[1]->type == 1) {
 					sat2 = (SATINFO*)derobs->endpoints[1];
 					if (sat2->Valid <= NOINIT || sat2->Health == 0 || sat2->in_num + sat2->out_num < 2)    continue;
-					memset(H_, 0, MAXSATNUM * DIM * sizeof(double));
+					memset(dPos, 0, DIM * sizeof(double));
+					
+					EmptySpraseMatrix(H);
 
 					MatrixMultiply(DIM, DIM, DIM, 1, derobs->P1RvState + 6, AllSatCov->Orb + sat1->index * DIM, X1);
 					MatrixMultiply(DIM, DIM, DIM, 1, derobs->P1TrState + 6, AllSatCov->Orb + sat1->index * DIM, X2);
@@ -2478,15 +2515,19 @@ void ANSMeasUpdate(SATNET* SatNet) {
 					for (j = 0; j < 3; j++)      dPos[j] = -1.0 * dPos[j];
 					MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P2RvState + 6, H3);
 
-					for (j = 0; j < DIM; j++)
-					{
-						H_[sat1->index * DIM + j] = H1[j] + H2[j];
-						H_[sat2->index * DIM + j] = H3[j] + H4[j];
+					for (j = 0; j < DIM; j++) {
+						H_[j] = H1[j] + H2[j];
 					}
+					CopySubSpraseMatrix(H, sat1->index, 0, DIM, 1, H_);
+					for (j = 0; j < DIM; j++) {
+						H_[j] = H3[j] + H4[j];
+					}
+					CopySubSpraseMatrix(H, sat2->index, 0, DIM, 1, H_);
+
 					O_C = derobs->DerANObs - Range1 - Range2 - derobs->AConCorr;
 					R = NoiseOfISL * NoiseOfISL;
 
-					if (ScalarOrbitMeasUpdate(O_C, R, H_, derobs->Valid, AllSatCov)) {
+					if (ScalarOrbitMeasUpdate(O_C, R, H, derobs->Valid, AllSatCov)) {
 						//sat1->TotalSatNum++;
 						//sat2->TotalSatNum++;
 						//if (derobs->Valid != 3)
@@ -2521,7 +2562,8 @@ void ANSMeasUpdate(SATNET* SatNet) {
 				sat = (SATINFO*)derobs->endpoints[1];
 				if (sat->type != 1 || sat->Valid <= NOINIT || sat->Health == 0 || sat->in_num + sat->out_num < 2) continue;
 				memset(dPos, 0, DIM * sizeof(double));
-				memset(H_, 0, MAXSATNUM * DIM * sizeof(double));
+
+				EmptySpraseMatrix(H);
 
 				MatrixMultiply(DIM, DIM, DIM, 1, derobs->P2RvState + 6, AllSatCov->Orb + sat->index * DIM, X3);
 				MatrixMultiply(DIM, DIM, DIM, 1, derobs->P2TrState + 6, AllSatCov->Orb + sat->index * DIM, X4);
@@ -2538,11 +2580,12 @@ void ANSMeasUpdate(SATNET* SatNet) {
 				for (j = 0; j < 3; j++)      dPos[j] = dPos[j] / Range2;
 				MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P2RvState + 6, H1);
 
-				for (j = 0; j < DIM; j++)   H_[sat->index * DIM + j] = H1[j] + H2[j];
+				for (j = 0; j < DIM; j++)   H_[j] = H1[j] + H2[j];
+				CopySubSpraseMatrix(H, sat->index, 0, DIM, 1, H_);
 				O_C = derobs->DerANObs - Range1 - Range2 - derobs->AConCorr;
 				R = NoiseOfISL * NoiseOfISL;
 
-				if (ScalarOrbitMeasUpdate(O_C, R, H_, max((int)derobs->Valid, 2), AllSatCov)) {
+				if (ScalarOrbitMeasUpdate(O_C, R, H, max((int)derobs->Valid, 2), AllSatCov)) {
 					//sat->TotalSatNum++;
 					//if (derobs->Valid != 3)  sat->ValidSatNum++;
 				}
@@ -2562,6 +2605,7 @@ void ANSMeasUpdate(SATNET* SatNet) {
 			}
 		}
 	}
+	DestroySpraseMatrix(H);
 
 	sat = (SATINFO*)SatNet->points;
 	for (i = 0; i < SatNum; i++) {
@@ -2655,7 +2699,7 @@ void ANSMeasUpdate(SATNET* SatNet) {
 		if (n > 1) {
 			CopyArray(DIM, sat->dX, AllSatCov->Orb + i * DIM);
 			MatrixAddition2(1, DIM, sat->dX, sat->X);
-			GetSubMatrix(SatNum * DIM, SatNum * DIM, i * DIM, i * DIM, DIM, DIM, AllSatCov->OrbCov, sat->CovX);
+			GetSubSpraseMatrix(AllSatCov->OrbCov, i, i, DIM, DIM, sat->CovX);
 		}
 
 		if (n > 1) {
@@ -2678,57 +2722,70 @@ void ANSMeasUpdate(SATNET* SatNet) {
 	}
 }
 
-int ScalarOrbitMeasUpdate(double O_C, double sigma2, double H[], int Scale, CONSTSTATE* AllSatCov)
+int ScalarOrbitMeasUpdate(double O_C, double sigma2, SpraseMatrix* H, int Scale, CONSTSTATE* AllSatCov)
 {
 	int i, j;
 	double Error;
-	double K[MAXSATNUM * DIM], TmpMat[MAXSATNUM * DIM], Mat[MAXSATNUM * DIM * MAXSATNUM * DIM], Cov[MAXSATNUM * DIM * MAXSATNUM * DIM];
+	
+	SpraseMatrix* TmpMat, * K, * Mat, * Cov;
+	TmpMat = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
+	K = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
+	Mat = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
+	Cov = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
+	CreateSpraseMatrix(TmpMat, SatNum, 1, DIM, 1);
+	CreateSpraseMatrix(K, SatNum, 1, DIM, 1);
+	CreateSpraseMatrix(Mat, SatNum, SatNum, DIM, DIM);
+	CreateSpraseMatrix(Cov, SatNum, SatNum, DIM, DIM);
 
-	for (i = 0; i < MAXSATNUM * DIM; i++)
-	{
-		K[i] = TmpMat[i] = 0.0;
-		for (j = 0; j < MAXSATNUM * DIM; j++) Mat[i * MAXSATNUM * 2 + j] = Cov[i * MAXSATNUM * 2 + j] = 0.0;
-	}
+	SpraseMatrixMultiply(AllSatCov->OrbCov, H, TmpMat);
 
-	MatrixMultiply(SatNum * DIM, SatNum * DIM, SatNum * DIM, 1, AllSatCov->OrbCov, H, TmpMat);
-	Error = sigma2 + VectDot(SatNum * DIM, SatNum * DIM, H, TmpMat);
+	Error = sigma2 + SpraseVectDot(H, TmpMat);
 
 	if ((Scale == 1 || Scale == 3) && fabs(O_C) / Error > 10.0)
 	{
 		return false;
 	}
 
-
-	for (i = 0; i < SatNum * DIM; i++)
-	{
-		K[i] = TmpMat[i] / Error;
-	}
-
-
 	if (Scale == 3)   return true;
 
-	for (i = 0; i < SatNum * DIM; i++)
-	{
-		AllSatCov->Orb[i] = AllSatCov->Orb[i] + K[i] * O_C;
+	SpraseMatrixNode* p;
+	double buff[DIM];
+	p = TmpMat->chead[0].down;
+	while (p != NULL) {
+		for (i = 0; i < DIM; i++)
+			buff[i] = *(p->submatrix + i) / Error;
+		CopySubSpraseMatrix(K, p->i, p->j, DIM, 1, buff);
+		for (i = 0; i < DIM; i++)
+			AllSatCov->Orb[p->i * DIM + i] += buff[i] * O_C;
+		p = p->down;
 	}
 
-	Dyadic(SatNum * DIM, SatNum * DIM, K, H, Mat);
+	double* buff_;
+	SpraseMatrixNode* pa, * pb;
 
-	for (i = 0; i < SatNum * DIM; i++)
-	{
-		for (j = 0; j < SatNum * DIM; j++)
-		{
-			*(Mat + i * SatNum * DIM + j) = -1.0 * *(Mat + i * SatNum * DIM + j);
-			if (i == j)
-			{
-				*(Mat + i * SatNum * DIM + j) = *(Mat + i * SatNum * DIM + j) + 1.0;
+	buff_ = (double*)malloc(sizeof(double) * DIM * DIM);
+	pa = K->chead[0].down;
+	while (pa != NULL) {
+		pb = H->chead[0].down;
+		while (pb != NULL) {
+			Dyadic(DIM, DIM, pa->submatrix, pb->submatrix, buff_);
+			for (i = 0; i < DIM; i++) {
+				for (j = 0; j < DIM; j++) {
+					*(buff_ + i * DIM + j) = 0 - *(buff_ + i * DIM + j);
+				}
 			}
+			CopySubSpraseMatrix(Mat, pa->i, pb->i, DIM, DIM, buff_);
+			pb = pb->down;
 		}
+		pa = pa->down;
 	}
-
-	MatrixMultiply(SatNum * DIM, SatNum * DIM, SatNum * DIM, SatNum * DIM,
-		Mat, AllSatCov->OrbCov, Cov);
-	CopyArray((SatNum * DIM) * (SatNum * DIM), AllSatCov->OrbCov, Cov);
+	free(buff_);
+	SpraseMatrixMultiply(Mat, AllSatCov->OrbCov, Cov);
+	SpraseMatrixAddition1(Cov, AllSatCov->OrbCov);
+	DestroySpraseMatrix(Cov);
+	DestroySpraseMatrix(TmpMat);
+	DestroySpraseMatrix(K);
+	DestroySpraseMatrix(Mat);
 
 	return true;
 }

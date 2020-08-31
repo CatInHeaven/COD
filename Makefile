@@ -1,4 +1,4 @@
-CC = mpicc
+CC = gcc
 
 objects = main.o RefSys.o GPSTime.o matrix.o util.o
 TARGET := cod

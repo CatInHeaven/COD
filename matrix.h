@@ -14,4 +14,30 @@ int CopySubMatrix(int Frow, int Fcol, int Brow, int Bcol, int row, int col, doub
 void MatrixMultiply_MPMT(int m, int n, const double M[], const double P[], double M2[]);
 int GetSubMatrix(int Frow, int Fcol, int Brow, int Bcol, int row, int col, double FMat[], double SubMat[]);
 int MatrixInv(int n, double a[], double b[]);
+
+typedef struct SpraseMatrixNode SpraseMatrixNode;
+
+typedef struct SpraseMatrixNode {
+    int i, j;               // index of submatrix
+    double *submatrix;      // submatrix
+    SpraseMatrixNode *right, *down;   // next none zore submatrix;
+}SpraseMatrixNode;
+
+typedef struct SpraseMatrix {
+    int mu, nu;             // size of sprase matrix
+    int sm, sn;             // size of submatrix
+    SpraseMatrixNode *rhead, *chead;  // row head and column head of sprase matrix
+}SpraseMatrix;
+
+void PrintSpraseMatrix(SpraseMatrix* SMatrix);
+int CreateSpraseMatrix(SpraseMatrix* SMatrix, int m, int n, int sm, int sn);
+void EmptySpraseMatrix(SpraseMatrix* SMatrix);
+void DestroySpraseMatrix(SpraseMatrix* SMatrix);
+int CopySubSpraseMatrix(SpraseMatrix* SMatrix, int i, int j, int m, int n, double SubMat[]);
+int GetSubSpraseMatrix(SpraseMatrix* SMatrix, int i, int j, int m, int n, double SubMat[]);
+int SpraseMatrixAddition(SpraseMatrix* A, SpraseMatrix* B, SpraseMatrix* C);
+int SpraseMatrixAddition1(SpraseMatrix* A, SpraseMatrix* B);
+int SpraseMatrixMultiply(SpraseMatrix* A, SpraseMatrix* B, SpraseMatrix* C);
+int SpraseMatrixMultiply_MPMT(SpraseMatrix* M, SpraseMatrix* P, SpraseMatrix* C);
+double SpraseVectDot(SpraseMatrix* A, SpraseMatrix* B);
 #endif

@@ -67,6 +67,7 @@ void graph_init(Graph* graph) {
 void graph_destroy(Graph* graph) {
 	points_destroy((Point*)graph->points);
 	edges_destroy((Edge*)graph->edges);
+	free(graph);
 }
 
 void graph_refresh(Graph* graph) {
@@ -97,8 +98,16 @@ void edges_init(Edge* edges) {
 }
 
 void points_destroy(Point* points) {
+	EdgeList* el;
+	Point* p;
+
+	for (p = (Point*)points->next; p != points; p = (Point*)p->next) {
+		list_empty((list*)&p->in_edges);
+		list_empty((list*)&p->out_edges);
+	}
 	list_destroy((list*)points);
 }
+
 
 void edges_destroy(Edge* edges) {
 	list_destroy((list*)edges);
