@@ -40,7 +40,7 @@ int main() {
 	struct timeval tv_end;
 	double dDuration;
 	gettimeofday(&tv_begin, NULL);
-	while (n < 10) {
+	while (n < 1) {
 		run();
 		printf("%4d %10.1f\n", FrameTime.Week, FrameTime.SecOfWeek);
 		n++;
@@ -88,85 +88,33 @@ int init() {
 	SatNet->edges = (Edge*)EpkDerObs;
 	graph_init((Graph*)SatNet);
 
-
-	// read satllite information
-
-	char FName[256] = { 0 };
-	sprintf(FName, "../../data/input/SATELLIT-BDS.I05");
-	FILE* Frin;
-	char Line[512];
-	SATINFO* Info;
-	int SCID;
-	unsigned char id;
-	int index;
-	if ((Frin = fopen(FName, "rt")) == NULL)
-	{
-		return -1;
-	}
-
-	fgets(Line, 256, Frin);
-	while (1)
-	{
-		memset(Line, 0, sizeof(Line));
-		if (fgets(Line, 256, Frin) == NULL)     return -1;
-
-		if (strstr(Line, "EOF") != NULL)         break;
-
-		//if (sscanf(Line, "%*d %*hd %*d %*hd %*hd %*hd %*hd %*hd %*hd %*lf %*hd %*lf %*lf %*lf %*lf %*lf %*lf %*hd", &SCID) != 1)
-		if (sscanf(Line, "%*d %*d %d %*d %*d %*d %*d %*d %*d %*f %*d %*f %*f %*f %*f %*f %*f %*d", &SCID) != 1)
-			continue;
-
-		id = (unsigned char)SCID;
-
-		if ((index = SearchSatIndex(id)) >= 0) {
-			if ((Info = (SATINFO*)malloc(sizeof(SATINFO))) == NULL) return -1;
-			Info->id = id;
-			SatID[index]->satinfo = Info;
-			point_append((Graph*)SatNet, (Point*)Info);
-			//TODO: other information initialization
-			Info->URA = 2;
-			Info->PDOP = 0;
-			Info->type = 1;
-			Info->Valid = ANSOK;
-			Info->GapTime = 0.0;
-			Info->SatClk.TotalNum = 0;
-			Info->SatClk.CurNum = 0;
-			Info->MeasStep = 300;
-			Info->MeanClk_pst = 0;
-			Info->StdClk_pst = 0;
-			Info->MeanClk_apr = 0;
-			Info->StdClk_apr = 0;
-			Info->MeanOrb_pst = 0;
-			Info->StdOrb_pst = 0;
-			Info->MeanOrb_apr = 0;
-			Info->StdOrb_apr = 0;
-			Info->Tgd[0] = 0;
-			Info->Tgd[1] = 0;
-		}
-	}
-	fclose(Frin);
-
-	//TODO: other information initialization
-	//initialize clk and X[6]
-	sprintf(FName, "../../data/input/InitState0629000000.txt");
-	if ((Frin = fopen(FName, "rt")) == NULL)
-	{
-		return -1;
-	}
-
-	SATINFO* p = SatNodes;
 	CONSTSTATE* AllSatCov;
 	AllSatCov = &SatNet->AllSatCov;
 	memset(AllSatCov->Clk, 0, sizeof(double) * MAXSATNUM * 2);
 	memset(AllSatCov->Orb, 0, sizeof(double) * MAXSATNUM * DIM);
 	AllSatCov->ClkCov = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
 	AllSatCov->OrbCov = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
-	CreateSpraseMatrix(AllSatCov->ClkCov, SatNet->points_num, SatNet->points_num, 2, 2);
-	CreateSpraseMatrix(AllSatCov->OrbCov, SatNet->points_num, SatNet->points_num, DIM, DIM);
-	
+	CreateSpraseMatrix(AllSatCov->ClkCov, SatNum, SatNum, 2, 2);
+	CreateSpraseMatrix(AllSatCov->OrbCov, SatNum, SatNum, DIM, DIM);
+
+
+	// read satllite information
+
+	char FName[256] = { 0 };
+	FILE* Frin;
+	char Line[512];
+	SATINFO* Info;
+	int SCID;
+	unsigned char id;
+	int index;
+
+	sprintf(FName, "../../data/input/InitState0629000000.txt");
+	if ((Frin = fopen(FName, "rt")) == NULL)	return -1;
 
 	double x[DIM];
 	double clk[2];
+	short health;
+	GPSTIME toe;
 	double SigmaPos, SigmaVel, SigmaClkoff, SigmaClkSht;
 
 	SigmaPos = PosAccu;
@@ -174,29 +122,44 @@ int init() {
 	SigmaClkoff = PosAccu / C_Light;
 	SigmaClkSht = VelAccu / C_Light;
 
-	while (!feof(Frin))
-	{
-		p = (SATINFO*)p->next;
+	while (!feof(Frin)){
 		fgets(Line, 512, Frin);
 		if (strncmp(Line, "EOF", 3) == 0)   break;
 
-		if (sscanf(Line, "%*d %*d %hd %lf %lf %lf %lf %lf %lf %lf %lf %lf %hd", &(p->TOE.Week), &(p->TOE.SecOfWeek), p->X, p->X + 1, p->X + 2, p->X + 3, p->X + 4, p->X + 5, p->Clk, p->Clk + 1, &(p->Health)) != 11)
+		if (sscanf(Line, "%d %*d %hd %lf %lf %lf %lf %lf %lf %lf %lf %lf %hd", &SCID, &(toe.Week), &(toe.SecOfWeek), x, x + 1, x + 2, x + 3, x + 4, x + 5, clk, clk + 1, &health) != 12)
 			continue;
 
+		id = (unsigned char)SCID;
+		if ((index = SearchSatIndex(id)) < 0) continue;
+		if ((Info = (SATINFO*)malloc(sizeof(SATINFO))) == NULL) return -1;
+		memset(Info, 0, sizeof(SATINFO));
+		Info->id = id;
+		//TODO: other information initialization
+		SatID[index]->satinfo = Info;
+		Info->URA = 2;
+		Info->type = 1;
+		Info->Valid = ANSOK;
+		Info->MeasStep = 300;
+		Info->Health = health;
+		for (i = 0; i < DIM; i++){
+			Info->X[i] = x[i];
+		}
+		Info->Clk[0] = clk[0];
+		Info->Clk[1] = clk[1];
+		Info->TOE = toe;
+
 		//initialize the covariance of clk and X
-		memset(p->CovC, 0, 4 * sizeof(double));
-		memset(p->CovX, 0, DIM * DIM * sizeof(double));
 		//diagonal matrix
-		p->CovC[0] = pow(SigmaClkoff, 2.0);
-		p->CovC[3] = pow(SigmaClkSht, 2.0);
-		for (i = 0; i < 3; i++)      p->CovX[i * (DIM + 1)] = pow(SigmaPos, 2.0);
-		for (i = 3; i < 6; i++)      p->CovX[i * (DIM + 1)] = pow(SigmaVel, 2.0);
+		Info->CovC[0] = pow(SigmaClkoff, 2.0);
+		Info->CovC[3] = pow(SigmaClkSht, 2.0);
+		for (i = 0; i < 3; i++)      Info->CovX[i * (DIM + 1)] = pow(SigmaPos, 2.0);
+		for (i = 3; i < 6; i++)      Info->CovX[i * (DIM + 1)] = pow(SigmaVel, 2.0);
 
-		CopyArray(2, AllSatCov->Clk + 2 * p->index, p->Clk);
-		CopySubSpraseMatrix(AllSatCov->OrbCov, p->index, p->index, DIM, DIM, p->CovX);
-		CopySubSpraseMatrix(AllSatCov->ClkCov, p->index, p->index, 2, 2, p->CovC);
+		CopyArray(2, AllSatCov->Clk + 2 * i, Info->Clk);
+		CopySubSpraseMatrix(AllSatCov->OrbCov, i, i, DIM, DIM, Info->CovX);
+		CopySubSpraseMatrix(AllSatCov->ClkCov, i, i, 2, 2, Info->CovC);
+		point_append((Graph*)SatNet, (Point*)Info);
 	}
-
 	fclose(Frin);
 
 	// initialize anchor station information
@@ -259,7 +222,6 @@ int GetAnchorIndex(const short SId) {
 void run() {
 	int i;
 	GPSTIME NextFramTime;
-	printf("_______________begin_______________\n");
 	NextFramTime.Week = FrameTime.Week;
 	NextFramTime.SecOfWeek = FrameTime.SecOfWeek + StepOfAutoNav;
 	CheckGPSTime(&NextFramTime);
@@ -298,7 +260,6 @@ void run() {
 	FrameTime.Week = NextFramTime.Week;
 	FrameTime.SecOfWeek = NextFramTime.SecOfWeek;
 	RunFlag = 1;
-	printf("_______________end_______________\n");
 }
 
 int ReadSimObsData(GPSTIME* Time, ISLPROBS* islist) {
@@ -2068,6 +2029,86 @@ void DectectDerObsOutlier(SATNET* SatNet)
 
 }
 
+void Dyadic(int m, int n, const double A[], const double B[], double Mat[])
+{
+	int i, j;
+
+	if (m < 1 || n < 1)
+	{
+		printf("Dyadic fail: n<1 or m<1. \n");
+		return;
+	}
+
+	for (i = 0; i < m; i++)
+	{
+		for (j = 0; j < n; j++)
+		{
+			*(Mat + i * n + j) = *(A + i) * *(B + j);
+		}
+	}
+}
+
+int ScalarMeasUpdate(double O_C, double sigma2, SpraseMatrix* H, int Scale, int size, double X[], SpraseMatrix* AllCov) {
+	int	i, j;
+	double	Error;
+
+	SpraseMatrix* K, * Mat, * Cov;
+	K = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
+	Mat = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
+	Cov = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
+
+	CreateSpraseMatrix(K, SatNum, 1, size, 1);
+	CreateSpraseMatrix(Mat, SatNum, SatNum, size, size);
+	CreateSpraseMatrix(Cov, SatNum, SatNum, size, size);
+
+	SpraseMatrixMultiply(AllCov, H, K);
+	Error = sigma2 + SpraseVectDot(H, K);
+
+	if ((Scale == 1 || Scale == 3) && fabs(O_C) / Error > 3.0) {
+		return false;
+	}
+
+	if (Scale == 3)  return true;
+
+	SpraseMatrixNode* p;
+	p = K->chead[0].down;
+	while (p != NULL) {
+		for (i = 0; i < size; i++)
+			*(p->submatrix + i) = *(p->submatrix + i) / Error;
+		for (i = 0; i < size; i++)
+			X[p->i * size + i] += *(p->submatrix + i) * O_C;
+		p = p->down;
+	}
+
+	double* buff_;
+	SpraseMatrixNode* pa, * pb;
+
+	buff_ = (double*)malloc(sizeof(double) * size * size);
+	pa = K->chead[0].down;
+	while (pa != NULL) {
+		pb = H->chead[0].down;
+		while (pb != NULL) {
+			Dyadic(size, size, pa->submatrix, pb->submatrix, buff_);
+			for (i = 0; i < size; i++) {
+				for (j = 0; j < size; j++) {
+					*(buff_ + i * size + j) = 0 - *(buff_ + i * size + j);
+				}
+			}
+			CopySubSpraseMatrix(Mat, pa->i, pb->i, size, size, buff_);
+			pb = pb->down;
+		}
+		pa = pa->down;
+	}
+	free(buff_);
+	SpraseMatrixMultiply(Mat, AllCov, Cov);
+	SpraseMatrixAddition1(Cov, AllCov);
+	DestroySpraseMatrix(Cov);
+	DestroySpraseMatrix(K);
+	DestroySpraseMatrix(Mat);
+
+	return true;
+}
+
 void ClkMeasUpdate(SATNET* SatNet) {
 	int i;
 	double	O_C = 0, R = 0, ClkRate[MAXSATNUM] = { 0 }, rms0 = 0, rms1 = 0;
@@ -2117,7 +2158,8 @@ void ClkMeasUpdate(SATNET* SatNet) {
 
 				R = NoiseOfISL * NoiseOfISL;
 
-				if (ScalarTimeMeasUpdate(O_C, R, H, max((int)derobs->Valid, 2), AllSatCov) == false) {
+				if (ScalarMeasUpdate(O_C, R, H, max((int)derobs->Valid, 2), 2, AllSatCov->Clk, AllSatCov->ClkCov) == false) {
+					derobs->Valid = -1;
 
 					printf("Clock MeasUpdate fail: SCID %2d %6d %10.1f %10.2f %8.3lf  Ref SCID:%2d\n",
 						sat->id, sat->TOE.Week,
@@ -2153,8 +2195,7 @@ void ClkMeasUpdate(SATNET* SatNet) {
 
 					R = NoiseOfISL * NoiseOfISL;
 
-					if (ScalarTimeMeasUpdate(O_C, R, H, derobs->Valid, AllSatCov) == false)
-					{
+					if (ScalarMeasUpdate(O_C, R, H, derobs->Valid, 2, AllSatCov->Clk, AllSatCov->ClkCov) == false) {
 						derobs->Valid = -1;
 
 						printf("Clock MeasUpdate fail: %2d %6d %10.1f %10.2f %8.2f  Ref SCID: %2d\n",
@@ -2250,91 +2291,6 @@ void ClkMeasUpdate(SATNET* SatNet) {
 			else                           sat->SatClk.CurNum--;
 		}
 	}
-}
-
-void Dyadic(int m, int n, const double A[], const double B[], double Mat[])
-{
-	int i, j;
-
-	if (m < 1 || n < 1)
-	{
-		printf("Dyadic fail: n<1 or m<1. \n");
-		return;
-	}
-
-	for (i = 0; i < m; i++)
-	{
-		for (j = 0; j < n; j++)
-		{
-			*(Mat + i * n + j) = *(A + i) * *(B + j);
-		}
-	}
-}
-
-int ScalarTimeMeasUpdate(double O_C, double sigma2, SpraseMatrix* H, int Scale, CONSTSTATE* AllSatCov)
-{
-	int	i, j;
-	double	Error;
-
-	SpraseMatrix *TmpMat, *K, *Mat, *Cov;
-	TmpMat = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
-	K = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
-	Mat = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
-	Cov = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
-	CreateSpraseMatrix(TmpMat, SatNum, 1, 2, 1);
-	CreateSpraseMatrix(K, SatNum, 1, 2, 1);
-	CreateSpraseMatrix(Mat, SatNum,	SatNum, 2, 2);
-	CreateSpraseMatrix(Cov, SatNum, SatNum, 2, 2);
-	
-	SpraseMatrixMultiply(AllSatCov->ClkCov, H, TmpMat);
-	Error = sigma2 + SpraseVectDot(H, TmpMat);
-
-	if ((Scale == 1 || Scale == 3) && fabs(O_C) / Error > 3.0) {
-		return false;
-	}
-
-	if (Scale == 3)  return true;
-
-	SpraseMatrixNode* p;
-	double buff[2];
-	p = TmpMat->chead[0].down;
-	while (p != NULL) {
-		buff[0] = *(p->submatrix) / Error;
-		buff[1] = *(p->submatrix + 1) / Error;
-		CopySubSpraseMatrix(K, p->i, p->j, 2, 1, buff);
-		AllSatCov->Clk[p->i * 2] += buff[0] * O_C;
-		AllSatCov->Clk[p->i * 2 + 1] += buff[1] * O_C;
-		p = p->down;
-	}
-
-	double* buff_;
-	SpraseMatrixNode* pa, * pb;
-
-	buff_ = (double*)malloc(sizeof(double) * 2 * 2);
-	pa = K->chead[0].down;
-	while (pa != NULL) {
-		pb = H->chead[0].down;
-		while (pb != NULL) {
-			Dyadic(2, 2, pa->submatrix, pb->submatrix, buff_);
-			for (i = 0; i < 2; i++) {
-				for (j = 0; j < 2; j++) {
-					*(buff_ + i * 2 + j) = 0 - *(buff_ + i * 2 + j);
-				}
-			}
-			CopySubSpraseMatrix(Mat, pa->i, pb->i, 2, 2, buff_);
-			pb = pb->down;
-		}
-		pa = pa->down;
-	}
-	free(buff_);
-	SpraseMatrixMultiply(Mat, AllSatCov->ClkCov, Cov);
-	SpraseMatrixAddition1(Cov, AllSatCov->ClkCov);
-	DestroySpraseMatrix(Cov);
-	DestroySpraseMatrix(TmpMat);
-	DestroySpraseMatrix(K);
-	DestroySpraseMatrix(Mat);
-
-	return true;
 }
 
 void mbbub(int n, double p[])
@@ -2527,7 +2483,7 @@ void ANSMeasUpdate(SATNET* SatNet) {
 					O_C = derobs->DerANObs - Range1 - Range2 - derobs->AConCorr;
 					R = NoiseOfISL * NoiseOfISL;
 
-					if (ScalarOrbitMeasUpdate(O_C, R, H, derobs->Valid, AllSatCov)) {
+					if (ScalarMeasUpdate(O_C, R, H, derobs->Valid, DIM, AllSatCov->Orb, AllSatCov->OrbCov)) {
 						//sat1->TotalSatNum++;
 						//sat2->TotalSatNum++;
 						//if (derobs->Valid != 3)
@@ -2585,7 +2541,7 @@ void ANSMeasUpdate(SATNET* SatNet) {
 				O_C = derobs->DerANObs - Range1 - Range2 - derobs->AConCorr;
 				R = NoiseOfISL * NoiseOfISL;
 
-				if (ScalarOrbitMeasUpdate(O_C, R, H, max((int)derobs->Valid, 2), AllSatCov)) {
+				if (ScalarMeasUpdate(O_C, R, H, max((int)derobs->Valid, 2), DIM, AllSatCov->Orb, AllSatCov->OrbCov)) {
 					//sat->TotalSatNum++;
 					//if (derobs->Valid != 3)  sat->ValidSatNum++;
 				}
@@ -2720,74 +2676,6 @@ void ANSMeasUpdate(SATNET* SatNet) {
 			if (sat->PDOP > 5.0 || Range1 > 5.0)    sat->Health = 3;
 		}
 	}
-}
-
-int ScalarOrbitMeasUpdate(double O_C, double sigma2, SpraseMatrix* H, int Scale, CONSTSTATE* AllSatCov)
-{
-	int i, j;
-	double Error;
-	
-	SpraseMatrix* TmpMat, * K, * Mat, * Cov;
-	TmpMat = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
-	K = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
-	Mat = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
-	Cov = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
-	CreateSpraseMatrix(TmpMat, SatNum, 1, DIM, 1);
-	CreateSpraseMatrix(K, SatNum, 1, DIM, 1);
-	CreateSpraseMatrix(Mat, SatNum, SatNum, DIM, DIM);
-	CreateSpraseMatrix(Cov, SatNum, SatNum, DIM, DIM);
-
-	SpraseMatrixMultiply(AllSatCov->OrbCov, H, TmpMat);
-
-	Error = sigma2 + SpraseVectDot(H, TmpMat);
-
-	if ((Scale == 1 || Scale == 3) && fabs(O_C) / Error > 10.0)
-	{
-		return false;
-	}
-
-	if (Scale == 3)   return true;
-
-	SpraseMatrixNode* p;
-	double buff[DIM];
-	p = TmpMat->chead[0].down;
-	while (p != NULL) {
-		for (i = 0; i < DIM; i++)
-			buff[i] = *(p->submatrix + i) / Error;
-		CopySubSpraseMatrix(K, p->i, p->j, DIM, 1, buff);
-		for (i = 0; i < DIM; i++)
-			AllSatCov->Orb[p->i * DIM + i] += buff[i] * O_C;
-		p = p->down;
-	}
-
-	double* buff_;
-	SpraseMatrixNode* pa, * pb;
-
-	buff_ = (double*)malloc(sizeof(double) * DIM * DIM);
-	pa = K->chead[0].down;
-	while (pa != NULL) {
-		pb = H->chead[0].down;
-		while (pb != NULL) {
-			Dyadic(DIM, DIM, pa->submatrix, pb->submatrix, buff_);
-			for (i = 0; i < DIM; i++) {
-				for (j = 0; j < DIM; j++) {
-					*(buff_ + i * DIM + j) = 0 - *(buff_ + i * DIM + j);
-				}
-			}
-			CopySubSpraseMatrix(Mat, pa->i, pb->i, DIM, DIM, buff_);
-			pb = pb->down;
-		}
-		pa = pa->down;
-	}
-	free(buff_);
-	SpraseMatrixMultiply(Mat, AllSatCov->OrbCov, Cov);
-	SpraseMatrixAddition1(Cov, AllSatCov->OrbCov);
-	DestroySpraseMatrix(Cov);
-	DestroySpraseMatrix(TmpMat);
-	DestroySpraseMatrix(K);
-	DestroySpraseMatrix(Mat);
-
-	return true;
 }
 
 int ClockOffsetFitting(TIMESYC* SatClk, GPSTIME* TOC, double Clk[3])
