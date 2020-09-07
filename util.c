@@ -60,12 +60,14 @@ void graph_init(Graph* graph) {
 	graph->points_num = 0;
 	//graph->points = (Point*)malloc(sizeof(Point));
 	points_init((Point*)graph->points);
+	points_init((Point*)graph->border_points);
 	//graph->edges = (Edge*)malloc(sizeof(Edge));
 	edges_init((Edge*)graph->edges);
 }
 
 void graph_destroy(Graph* graph) {
 	points_destroy((Point*)graph->points);
+	list_destroy((list*)graph->border_points);
 	edges_destroy((Edge*)graph->edges);
 	free(graph);
 }
@@ -91,6 +93,14 @@ void point_append(Graph* graph, Point* point) {
 	list_init((list*)&point->out_edges);
 	point->index = graph->points_num;
 	graph->points_num++;
+}
+
+void border_point_append(Graph* graph, Point* point) {
+	list_append((list*)graph->border_points, (node_t*)point);
+	// list_init((list*)&point->in_edges);
+	// list_init((list*)&point->out_edges);
+	// point->index = graph->points_num;
+	// graph->points_num++;
 }
 
 void edges_init(Edge* edges) {
@@ -131,12 +141,14 @@ void print_graph(Graph* graph){
 		printf("IN\n");
 		for (el = (EdgeList*)p->in_edges.next; el != &p->in_edges; el = (EdgeList*)el->next){
 			e = el->edge;
-			printf("endpoints %d %d\n",e->endpoints[0]->index,e->endpoints[1]->index);
+			if (e->endpoints[1]!=NULL) printf("endpoints %d %d\n",e->endpoints[0]->index,e->endpoints[1]->index);
+			else printf ("endpoints %d -\n",e->endpoints[0]->index);
 		}
 		printf("OUT\n");
 		for (el = (EdgeList*)p->out_edges.next; el != &p->out_edges; el = (EdgeList*)el->next){
 			e = el->edge;
-			printf("endpoints %d %d\n",e->endpoints[0]->index,e->endpoints[1]->index);
+			if (e->endpoints[0]!=NULL) printf("endpoints %d %d\n",e->endpoints[0]->index,e->endpoints[1]->index);
+			else printf ("endpoints - %d \n",e->endpoints[1]->index);
 		}
 	}
 }

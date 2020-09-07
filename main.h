@@ -95,6 +95,8 @@ typedef struct ISLPROBS {
 	short	TrAnt;
 	short	RvAnt;
 	GPSTIME RvLocTime;       // 测量时刻的卫星钟的表面时
+	double	tpv[6];
+	double  rpv[6];
 	double  PRObs;           // 星间距离观测值
 	//unsigned short Quality;         // 观测数据的质量, 未知为0
 	//int    Valid;                  // 星间伪距观测值的有效性
@@ -147,7 +149,7 @@ typedef struct SATINDEX {
 int init();
 void run();
 
-int SearchSatIndex(const int SID);
+int GetPointRank(int id);
 
 int ReadSimObsData(GPSTIME* Time, ISLPROBS* islist);
 double GetPseudoRange(int tid, int w, double sec, double rpv[6], double tpv[6]);

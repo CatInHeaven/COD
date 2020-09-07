@@ -4,6 +4,7 @@
 #include <math.h>
 #include "main.h"
 #include <sys/time.h>
+#include <mpi.h>
 
 FILE* FDerOrb, * FDerClk, * FPProc, * FPLOG, * FDerMAO;
 FILE* Fres;
@@ -12,7 +13,8 @@ GPSTIME    FrameTime;
 int        SatNum;
 int		AncNum = 1;
 
-SATINDEX        SatID[MAXSATNUM][2] = { {19,},{20,},{21,},{22,},{23,},{24,},{25,},{26,},{27,},{28,},{29,},{30,},{36,},{37,},{38,},{39,},{40,},{41,},{42,},{43,},{44,},{45,},{46,},{47,} };
+//SATINDEX        SatID[MAXSATNUM][2] = { {19,},{20,},{21,},{22,},{23,},{24,},{25,},{26,},{27,},{28,},{29,},{30,},{36,},{37,},{38,},{39,},{40,},{41,},{42,},{43,},{44,},{45,},{46,},{47,} };
+int   IDList[MAXSATNUM][2] = { {19,0},{20,1},{21,2},{22,0},{23,1},{24,2},{25,0},{26,1},{27,2},{28,0},{29,1},{30,2},{36,0},{37,1},{38,2},{39,0},{40,1},{41,2},{42,0},{43,1},{44,2},{45,0},{46,1},{47,2},{76,0} };
 double     PosAccu, VelAccu;         
 
 double StepOfAutoNav = 300;
@@ -20,6 +22,7 @@ double NoiseOfISL = 5.0;
 double OrbDiff = 100;
 double ClkDiff = 50;
 int RunFlag = 0;
+int TotalSatNum = 24;
 // satellite network
 SATNET* SatNet;
 
@@ -33,35 +36,49 @@ DEROBS* EpkDerObs;
 ISLPROBS* SimData;
 //ISLPROBS* EpkISLObs;
 
+// MPI Environment
+int world_size;
+int world_rank;
+
 int main() {
-	if (init() < 0)	return -1;
+	MPI_Init(NULL, NULL);
+	MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+	MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+	//if (init() < 0)	return -1;
+	init();
 	int n = 0;
 	struct timeval tv_begin;
 	struct timeval tv_end;
 	double dDuration;
 	gettimeofday(&tv_begin, NULL);
-	while (n < 1) {
+	while (n < 10) {
 		run();
 		printf("%4d %10.1f\n", FrameTime.Week, FrameTime.SecOfWeek);
 		n++;
 	}
 	gettimeofday(&tv_end, NULL);
 	dDuration = 1000 * (tv_end.tv_sec - tv_begin.tv_sec) + ((tv_end.tv_usec - tv_begin.tv_usec) / 1000.0);
-	printf("Duration: %f ms\n",dDuration);
+	printf("Process %d Duration: %f ms\n",world_rank, dDuration);
 	// TODO memory free!
 	DestroySpraseMatrix(SatNet->AllSatCov.ClkCov);
 	DestroySpraseMatrix(SatNet->AllSatCov.OrbCov);
 	graph_destroy((Graph*)SatNet);
-	list_destroy((list*)SimData);
+	if (world_rank == 0) list_destroy((list*)SimData);
 	fclose(FDerOrb);
 	fclose(FDerClk);
 	fclose(FPProc);
 	fclose(FPLOG);
 	fclose(FDerMAO);
+	MPI_Finalize();
+	printf("I'm %d, I finished here.\n",world_rank);
 	return 0;
 }
 
 int init() {
+	int send_rank;
+	int receive_rank;
+	receive_rank = 0; // main process
+
 	int i;
 
 	// start time
@@ -75,7 +92,7 @@ int init() {
 
 
 	// configuration
-	SatNum = 24;
+	//SatNum = 24;
 	PosAccu = 2.0;
 	VelAccu = 0.05;
 	StepOfAutoNav = 300.0;
@@ -84,10 +101,107 @@ int init() {
 	if ((SatNet = (SATNET*)malloc(sizeof(SATNET))) == NULL) return -1;
 	if ((SatNodes = (SATINFO*)malloc(sizeof(SATINFO))) == NULL) return -1;
 	SatNet->points = (Point*)SatNodes;
-	if ((EpkDerObs = (DEROBS*)malloc(sizeof(ISLPROBS))) == NULL) return -1;
+	if ((EpkDerObs = (DEROBS*)malloc(sizeof(DEROBS))) == NULL) return -1;
 	SatNet->edges = (Edge*)EpkDerObs;
+	if ((SatNet->border_points = (Point*)malloc(sizeof(SATINFO))) == NULL) return -1;
 	graph_init((Graph*)SatNet);
 
+	SATINFO* Info;
+	// read satllite information
+	if (world_rank == 0) {
+		char FName[256] = { 0 };
+		FILE* Frin;
+		char Line[512];
+		int SCID;
+		unsigned char id;
+		int index;
+
+		sprintf(FName, "../../data/input/InitState0629000000.txt");
+		if ((Frin = fopen(FName, "rt")) == NULL)	return -1;
+
+		double x[DIM];
+		double clk[2];
+		short health;
+		GPSTIME toe;
+		double SigmaPos, SigmaVel, SigmaClkoff, SigmaClkSht;
+
+		SigmaPos = PosAccu;
+		SigmaVel = VelAccu;
+		SigmaClkoff = PosAccu / C_Light;
+		SigmaClkSht = VelAccu / C_Light;
+
+		while (!feof(Frin)){
+			fgets(Line, 512, Frin);
+			if (strncmp(Line, "EOF", 3) == 0)   break;
+
+			if (sscanf(Line, "%d %*d %hd %lf %lf %lf %lf %lf %lf %lf %lf %lf %hd", &SCID, &(toe.Week), &(toe.SecOfWeek), x, x + 1, x + 2, x + 3, x + 4, x + 5, clk, clk + 1, &health) != 12)
+				continue;
+
+			id = (unsigned char)SCID;
+			if ((send_rank = GetPointRank(id)) < 0)	continue;
+			//if ((index = SearchSatIndex(id)) < 0) continue;
+			if ((Info = (SATINFO*)malloc(sizeof(SATINFO))) == NULL) return -1;
+			memset(Info, 0, sizeof(SATINFO));
+			Info->id = id;
+			//TODO: other information initialization
+			//SatID[index]->satinfo = Info;
+			Info->URA = 2;
+			Info->type = 1;
+			Info->Valid = ANSOK;
+			Info->MeasStep = 300;
+			Info->Health = health;
+			for (i = 0; i < DIM; i++){
+				Info->X[i] = x[i];
+			}
+			Info->Clk[0] = clk[0];
+			Info->Clk[1] = clk[1];
+			Info->TOE = toe;
+
+			//initialize the covariance of clk and X
+			//diagonal matrix
+			Info->CovC[0] = pow(SigmaClkoff, 2.0);
+			Info->CovC[3] = pow(SigmaClkSht, 2.0);
+			for (i = 0; i < 3; i++)      Info->CovX[i * (DIM + 1)] = pow(SigmaPos, 2.0);
+			for (i = 3; i < 6; i++)      Info->CovX[i * (DIM + 1)] = pow(SigmaVel, 2.0);
+
+			MPI_Send((char*)Info, sizeof(SATINFO), MPI_BYTE, 1, 0, MPI_COMM_WORLD);
+			MPI_Send((char*)Info, sizeof(SATINFO), MPI_BYTE, 2, 0, MPI_COMM_WORLD);
+			if (send_rank != 0) {
+				border_point_append((Graph*)SatNet, (Point*)Info);
+				//free(Info);
+			}
+			else {
+				Info->rank = world_rank;
+				point_append((Graph*)SatNet, (Point*)Info);
+			}
+		}
+		fclose(Frin);
+		MPI_Send(Info, 0, MPI_BYTE, 1, 0, MPI_COMM_WORLD);
+		MPI_Send(Info, 0, MPI_BYTE, 2, 0, MPI_COMM_WORLD);
+	}
+	else {
+		MPI_Status status;
+		int count;
+		while (1) {
+			if ((Info = (SATINFO*)malloc(sizeof(SATINFO))) == NULL) return -1;
+			MPI_Recv((char*)Info, sizeof(SATINFO), MPI_BYTE, 0, 0, MPI_COMM_WORLD, &status);
+			MPI_Get_count(&status, MPI_BYTE, &count);
+			if (count <= 0) break; 
+
+			if ((receive_rank = GetPointRank(Info->id)) < 0)	continue;
+
+			if (receive_rank == world_rank) {
+				Info->rank = world_rank;
+				point_append((Graph*)SatNet, (Point*)Info);
+			}
+			else {
+				border_point_append((Graph*)SatNet, (Point*)Info);
+			}
+		}
+		free(Info);
+	}
+
+	SatNum = SatNet->points_num;
 	CONSTSTATE* AllSatCov;
 	AllSatCov = &SatNet->AllSatCov;
 	memset(AllSatCov->Clk, 0, sizeof(double) * MAXSATNUM * 2);
@@ -96,127 +210,108 @@ int init() {
 	AllSatCov->OrbCov = (SpraseMatrix*)malloc(sizeof(SpraseMatrix));
 	CreateSpraseMatrix(AllSatCov->ClkCov, SatNum, SatNum, 2, 2);
 	CreateSpraseMatrix(AllSatCov->OrbCov, SatNum, SatNum, DIM, DIM);
-
-
-	// read satllite information
-
-	char FName[256] = { 0 };
-	FILE* Frin;
-	char Line[512];
-	SATINFO* Info;
-	int SCID;
-	unsigned char id;
-	int index;
-
-	sprintf(FName, "../../data/input/InitState0629000000.txt");
-	if ((Frin = fopen(FName, "rt")) == NULL)	return -1;
-
-	double x[DIM];
-	double clk[2];
-	short health;
-	GPSTIME toe;
-	double SigmaPos, SigmaVel, SigmaClkoff, SigmaClkSht;
-
-	SigmaPos = PosAccu;
-	SigmaVel = VelAccu;
-	SigmaClkoff = PosAccu / C_Light;
-	SigmaClkSht = VelAccu / C_Light;
-
-	while (!feof(Frin)){
-		fgets(Line, 512, Frin);
-		if (strncmp(Line, "EOF", 3) == 0)   break;
-
-		if (sscanf(Line, "%d %*d %hd %lf %lf %lf %lf %lf %lf %lf %lf %lf %hd", &SCID, &(toe.Week), &(toe.SecOfWeek), x, x + 1, x + 2, x + 3, x + 4, x + 5, clk, clk + 1, &health) != 12)
-			continue;
-
-		id = (unsigned char)SCID;
-		if ((index = SearchSatIndex(id)) < 0) continue;
-		if ((Info = (SATINFO*)malloc(sizeof(SATINFO))) == NULL) return -1;
-		memset(Info, 0, sizeof(SATINFO));
-		Info->id = id;
-		//TODO: other information initialization
-		SatID[index]->satinfo = Info;
-		Info->URA = 2;
-		Info->type = 1;
-		Info->Valid = ANSOK;
-		Info->MeasStep = 300;
-		Info->Health = health;
-		for (i = 0; i < DIM; i++){
-			Info->X[i] = x[i];
-		}
-		Info->Clk[0] = clk[0];
-		Info->Clk[1] = clk[1];
-		Info->TOE = toe;
-
-		//initialize the covariance of clk and X
-		//diagonal matrix
-		Info->CovC[0] = pow(SigmaClkoff, 2.0);
-		Info->CovC[3] = pow(SigmaClkSht, 2.0);
-		for (i = 0; i < 3; i++)      Info->CovX[i * (DIM + 1)] = pow(SigmaPos, 2.0);
-		for (i = 3; i < 6; i++)      Info->CovX[i * (DIM + 1)] = pow(SigmaVel, 2.0);
-
-		CopyArray(2, AllSatCov->Clk + 2 * i, Info->Clk);
-		CopySubSpraseMatrix(AllSatCov->OrbCov, i, i, DIM, DIM, Info->CovX);
-		CopySubSpraseMatrix(AllSatCov->ClkCov, i, i, 2, 2, Info->CovC);
-		point_append((Graph*)SatNet, (Point*)Info);
+	SATINFO* sat;
+	sat = (SATINFO*)SatNet->points;
+	for (i = 0; i < SatNum; i++) {
+		sat = (SATINFO*)sat->next;
+		CopyArray(2, AllSatCov->Clk + 2 * i, sat->Clk);
+		CopySubSpraseMatrix(AllSatCov->OrbCov, i, i, DIM, DIM, sat->CovX);
+		CopySubSpraseMatrix(AllSatCov->ClkCov, i, i, 2, 2, sat->CovC);
 	}
-	fclose(Frin);
 
-	// initialize anchor station information
-	if ((Anchor = (ANCHSTN*)malloc(sizeof(ANCHSTN))) == NULL) return -1;
-	point_append((Graph*)SatNet, (Point*)Anchor);
-	Anchor[0].StnId = 76;
-	Anchor[0].type = 0;
-	Anchor[0].clk = 0.0;
-	Anchor[0].Pos[0] = -2003066.221396;
-	Anchor[0].Pos[1] = 5716340.837106;
-	Anchor[0].Pos[2] = 1991308.673030;
-	Anchor[0].Tgd[0] = 0.0;
-	Anchor[0].Tgd[1] = 0.0;
-	Anchor[0].RefClkFlag = 1;
-	Anchor[0].Valid = 1;
+	if (world_rank == 0) {
+		// initialize anchor station information
+		if ((Anchor = (ANCHSTN*)malloc(sizeof(ANCHSTN))) == NULL) return -1;
+		point_append((Graph*)SatNet, (Point*)Anchor);
+		Anchor[0].StnId = 76;
+		Anchor[0].type = 0;
+		Anchor[0].rank = world_rank;
+		Anchor[0].clk = 0.0;
+		Anchor[0].Pos[0] = -2003066.221396;
+		Anchor[0].Pos[1] = 5716340.837106;
+		Anchor[0].Pos[2] = 1991308.673030;
+		Anchor[0].Tgd[0] = 0.0;
+		Anchor[0].Tgd[1] = 0.0;
+		Anchor[0].RefClkFlag = 1;
+		Anchor[0].Valid = 1;
 
-	// read simulate data (small dataset)
-	if ((SimData = (ISLPROBS*)malloc(sizeof(ISLPROBS))) == NULL) return -1;
-	//if ((EpkISLObs = (ISLPROBS*)malloc(sizeof(ISLPROBS))) == NULL) return -1;
-	list_init((list*)SimData);
-	//list_init((list*)EpkISLObs);
-	if (ReadSimObsData(&FrameTime, SimData) < 0) return -1;
-
+		// read simulate data (small dataset)
+		if ((SimData = (ISLPROBS*)malloc(sizeof(ISLPROBS))) == NULL) return -1;
+		//if ((EpkISLObs = (ISLPROBS*)malloc(sizeof(ISLPROBS))) == NULL) return -1;
+		list_init((list*)SimData);
+		//list_init((list*)EpkISLObs);
+		if (ReadSimObsData(&FrameTime, SimData) < 0) return -1;
+	}
 	return 0;
 }
 
-int SearchSatIndex(int SID) {
+int SearchSatIndex(int id) {
 	int i;
 	for (i = 0; i < SatNum; i++) {
-		if (SID == SatID[i]->SID)
+		if (id == IDList[i][0])
 			return i;
 	}
 	return -1;
 }
 
-SATINFO* GetSatIndex(int SID) {
+char* GetPoint(int id) {
 	int index;
-	SATINFO* sat = NULL;
-	index = SearchSatIndex(SID);
-	if (index >= 0)
-		sat = SatID[index]->satinfo;
-	return sat;
+	char* node = NULL;
+	Point* iter;
+	for (iter = (Point*)SatNet->points->next; iter != SatNet->points; iter = (Point*)iter->next){
+		if (iter->type == 1) {
+			//printf("%d %d %d\n",id, ((SATINFO*)iter)->id, world_rank);
+			if (((SATINFO*)iter)->id == id) {
+				node = (char*)iter;
+				break;
+			}
+			else continue;
+			
+		}
+		if (iter->type == 0) {
+			if (((ANCHSTN*)iter)->StnId == id) {
+				node = (char*)iter;
+				break;
+			}
+		}
+		
+	}
+	return node;
 }
 
-int GetAnchorIndex(const short SId) {
-	int i, RetVal;
-
-	RetVal = -1;
-	for (i = 0; i < MAXANCHORNUM; i++)
-	{
-		if (Anchor[i].StnId == SId)
-		{
-			RetVal = i;
-			break;
+char* GetBorderPoint(int id) {
+	int index;
+	char* node = NULL;
+	Point* iter;
+	for (iter = (Point*)SatNet->border_points->next; iter != SatNet->border_points; iter = (Point*)iter->next){
+		if (iter->type == 1) {
+			//printf("%d %d %d\n",id, ((SATINFO*)iter)->id, world_rank);
+			if (((SATINFO*)iter)->id == id) {
+				node = (char*)iter;
+				break;
+			}
+			else continue;
+			
 		}
+		if (iter->type == 0) {
+			if (((ANCHSTN*)iter)->StnId == id) {
+				node = (char*)iter;
+				break;
+			}
+		}
+		
 	}
-	return RetVal;
+	return node;
+}
+
+int GetPointRank(int id) {
+	int i;
+	for (i = 0; i < TotalSatNum + AncNum; i++) {
+		if (id == IDList[i][0])
+			return IDList[i][1];
+	}
+	printf("can't find id = %d\n",id);
+	return -1;
 }
 
 void run() {
@@ -231,10 +326,11 @@ void run() {
 
 		OpenANSResFileDaily(&NextFramTime);
 	}
-	// add link to Satellite Network
-	AssignEpkISLObs(&NextFramTime, SimData, SatNet);
 
 	TimeUpdate(&NextFramTime, SatNet);
+
+	// add link to Satellite Network
+	AssignEpkISLObs(&NextFramTime, SimData, SatNet);
 	GenDerPrObs(SatNet);
 
 	printf("开始进行数据预处理\n");
@@ -268,8 +364,6 @@ int ReadSimObsData(GPSTIME* Time, ISLPROBS* islist) {
 	FILE* in;
 	GPSTIME CurTime;
 	ISLPROBS* obs;
-	double rpv[6];
-	double tpv[6];
 
 	CurTime.Week = Time->Week;
 	CurTime.SecOfWeek = Time->SecOfWeek;
@@ -286,25 +380,25 @@ int ReadSimObsData(GPSTIME* Time, ISLPROBS* islist) {
 		obs = (ISLPROBS*)malloc(sizeof(ISLPROBS));
 		if (sscanf(Line, "%hd %lf %hd %hd %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf",
 			&obs->RvLocTime.Week, &obs->RvLocTime.SecOfWeek, &obs->TrScid, &obs->RvScid,
-			&tpv[0], &tpv[1], &tpv[2], &tpv[3], &tpv[4], &tpv[5],
-			&rpv[0], &rpv[1], &rpv[2], &rpv[3], &rpv[4], &rpv[5]) < 16)  continue;
+			&obs->tpv[0], &obs->tpv[1], &obs->tpv[2], &obs->tpv[3], &obs->tpv[4], &obs->tpv[5],
+			&obs->rpv[0], &obs->rpv[1], &obs->rpv[2], &obs->rpv[3], &obs->rpv[4], &obs->rpv[5]) < 16)  continue;
 
 		obs->TrAnt = obs->RvAnt = 1;
 		if (obs->TrScid == 76) {
 			obs->TrAnt = 6;
-			ICRF_ITRF_GPST(MJD_J2000, &obs->RvLocTime, 0, tpv, Anchor[0].Pos);
+			ICRF_ITRF_GPST(MJD_J2000, &obs->RvLocTime, 0, obs->tpv, Anchor[0].Pos);
 		}
 		if (obs->RvScid == 76) {
 			obs->RvAnt = 6;
-			ICRF_ITRF_GPST(MJD_J2000, &obs->RvLocTime, 0, rpv, Anchor[0].Pos);
+			ICRF_ITRF_GPST(MJD_J2000, &obs->RvLocTime, 0, obs->rpv, Anchor[0].Pos);
 		}
 
-		obs->PRObs = GetPseudoRange(obs->TrScid, obs->RvLocTime.Week, obs->RvLocTime.SecOfWeek, rpv, tpv);
+		//obs->PRObs = GetPseudoRange(obs->TrScid, obs->RvLocTime.Week, obs->RvLocTime.SecOfWeek, rpv, tpv);
 
 		//obs->Valid = true;
 		for (int i = 0; i < 10; i++)  *(obs->Corr + i) = 0.0;
-		if (obs->TrScid != 0 && obs->RvScid != 0 && fabs(obs->PRObs) > 0.1)
-			list_append((list*)islist, (node_t*)obs);
+		//if (obs->TrScid != 0 && obs->RvScid != 0 && fabs(obs->PRObs) > 0.1)
+		list_append((list*)islist, (node_t*)obs);
 	}
 	return 0;
 }
@@ -712,51 +806,157 @@ int AssignEpkISLObs(GPSTIME* Time, ISLPROBS* il, SATNET* SatNet) {
 	graph_refresh((Graph*)SatNet);
 	n = 0;
 
-	for (iter = il->next; iter != (node_t*)il;) {
-		isl = (ISLPROBS*)iter;
-		dt = GetDifGPSTime(&isl->RvLocTime, Time);
-		iter = iter->next;
-		if (dt < StepOfAutoNav) {	
-			if (dt >= 0.0) {
-				list_delete((list*)il, iter->prev);
-				p1 = (Point*)GetSatIndex(isl->RvScid);
-				p2 = (Point*)GetSatIndex(isl->TrScid);
-				if (p1 == NULL) {
-					if ((id = GetAnchorIndex(isl->RvScid)) < 0)
-						continue;
-					p1 = (Point*)&Anchor[id];
-				}
-				if (p2 == NULL) {
-					if ((id = GetAnchorIndex(isl->TrScid)) < 0)
-						continue;
-					p2 = (Point*)&Anchor[id];
-				}
-				isl->endpoints[0] = p1;
-				isl->endpoints[1] = p2;
-				edge_in = (EdgeList*)malloc(sizeof(EdgeList));
-				edge_out = (EdgeList*)malloc(sizeof(EdgeList));
-				edge_in->edge = (Edge*)isl;
-				edge_out->edge = (Edge*)isl;
-				edge_in->flag = 0;
-				edge_out->flag = 0;
-				edge_in->reverse = edge_out;
-				edge_out->reverse = edge_in;
-				list_append((list*)&p1->in_edges, (node_t*)edge_in);
-				list_append((list*)&p2->out_edges, (node_t*)edge_out);
-				p1->in_num++;
-				p2->out_num++;
+	int Rvrank, Trrank;
 
-				n++;
+	if (world_rank == 0) {
+		for (iter = il->next; iter != (node_t*)il;) {
+			isl = (ISLPROBS*)iter;
+			dt = GetDifGPSTime(&isl->RvLocTime, Time);
+			iter = iter->next;
+			if (dt < StepOfAutoNav) {	
+				if (dt >= 0.0) {
+					list_delete((list*)il, iter->prev);
+					isl->PRObs = GetPseudoRange(isl->TrScid, isl->RvLocTime.Week, isl->RvLocTime.SecOfWeek, isl->rpv, isl->tpv);
+					if (isl->TrScid < 0 || isl->RvScid != 0 && fabs(isl->PRObs) < 0.1) {
+						free(isl);
+						continue;
+					}
+					Rvrank = GetPointRank(isl->RvScid);
+					Trrank = GetPointRank(isl->TrScid);
+					p1 = (Point*)GetPoint(isl->RvScid);
+					p2 = (Point*)GetPoint(isl->TrScid);
+					isl->endpoints[0] = p1;
+					isl->endpoints[1] = p2;
+					if (Rvrank == Trrank) {
+						// the same process
+						
+						if (Rvrank == 0) {
+							// both endpoints in the main process
+							if (p1 == NULL || p2 == NULL) continue;
+							edge_in = (EdgeList*)malloc(sizeof(EdgeList));
+							edge_in->edge = (Edge*)isl;
+							edge_in->flag = 0;
+							list_append((list*)&p1->in_edges, (node_t*)edge_in);
+							p1->in_num++;
+							edge_out = (EdgeList*)malloc(sizeof(EdgeList));
+							edge_out->edge = (Edge*)isl;
+							edge_out->flag = 0;
+							list_append((list*)&p2->out_edges, (node_t*)edge_out);
+							p2->out_num++;
+							edge_in->reverse = edge_out;
+							edge_out->reverse = edge_in;
+							n++;
+						}
+						else {
+							// only need to send to one other process
+							MPI_Send((char*)isl, sizeof(ISLPROBS), MPI_BYTE, Rvrank, 0, MPI_COMM_WORLD);
+							free(isl);
+						}
+					} else {
+						// different processes
+						if (Rvrank == 0) {
+							// p1 not NULL
+							if (p1 == NULL) continue;
+							edge_in = (EdgeList*)malloc(sizeof(EdgeList));
+							edge_in->edge = (Edge*)isl;
+							edge_in->flag = 0;
+							list_append((list*)&p1->in_edges, (node_t*)edge_in);
+							p1->in_num++;
+							edge_in->reverse = NULL;
+							MPI_Send((char*)isl, sizeof(ISLPROBS), MPI_BYTE, Trrank, 0, MPI_COMM_WORLD);
+							p2 = (Point*)GetBorderPoint(isl->TrScid);
+							if (p2 == NULL) continue;
+							isl->endpoints[1] = p2;
+							n++;
+						}
+						else if (Trrank == 0) {
+							// p2 not NULL
+							if (p2 == NULL) continue;
+							edge_out = (EdgeList*)malloc(sizeof(EdgeList));
+							edge_out->edge = (Edge*)isl;
+							edge_out->flag = 0;
+							list_append((list*)&p2->out_edges, (node_t*)edge_out);
+							p2->out_num++;
+							edge_out->reverse = NULL;
+							MPI_Send((char*)isl, sizeof(ISLPROBS), MPI_BYTE, Rvrank, 0, MPI_COMM_WORLD);
+							p1 = (Point*)GetBorderPoint(isl->RvScid);
+							if (p1 == NULL) continue;
+							isl->endpoints[0] = p1;
+							n++;
+						} else {
+							// send to p1 and p2 processes
+							MPI_Send((char*)isl, sizeof(ISLPROBS), MPI_BYTE, Rvrank, 0, MPI_COMM_WORLD);
+							MPI_Send((char*)isl, sizeof(ISLPROBS), MPI_BYTE, Trrank, 0, MPI_COMM_WORLD);
+							free(isl);
+						}
+					}
+				}
+				else {
+					list_erase((list*)il, iter->prev);
+				}
 			}
 			else {
-				list_erase((list*)il, iter->prev);
+				break;
 			}
+			//TODO find repeat links
 		}
-		else {
-			break;
-		}
-		//TODO find repeat links
+		MPI_Send(isl, 0, MPI_BYTE, 1, 0, MPI_COMM_WORLD);
+		MPI_Send(isl, 0, MPI_BYTE, 2, 0, MPI_COMM_WORLD);
 	}
+	else {
+		MPI_Status status;
+		int count;
+		while (1) {
+			isl = (ISLPROBS*)malloc(sizeof(ISLPROBS));
+			MPI_Recv((char*)isl, sizeof(ISLPROBS), MPI_BYTE, 0, 0, MPI_COMM_WORLD, &status);
+			MPI_Get_count(&status, MPI_BYTE, &count);
+			if (count <= 0) break; 
+			// isl->PRObs = GetPseudoRange(isl->TrScid, isl->RvLocTime.Week, isl->RvLocTime.SecOfWeek, isl->rpv, isl->tpv);
+			// if (isl->TrScid < 0 || isl->RvScid != 0 && fabs(isl->PRObs) < 0.1) {
+			// 	free(isl);
+			// 	continue;
+			// }
+			p1 = (Point*)GetPoint(isl->RvScid);
+			p2 = (Point*)GetPoint(isl->TrScid);
+			isl->endpoints[0] = p1;
+			isl->endpoints[1] = p2;
+			if (p1 != NULL) {
+				edge_in = (EdgeList*)malloc(sizeof(EdgeList));
+				edge_in->edge = (Edge*)isl;
+				edge_in->flag = 0;
+				list_append((list*)&p1->in_edges, (node_t*)edge_in);
+				p1->in_num++;
+				edge_in->reverse = NULL;
+				if (p2 != NULL) {
+					edge_out = (EdgeList*)malloc(sizeof(EdgeList));
+					edge_out->edge = (Edge*)isl;
+					edge_out->flag = 0;
+					list_append((list*)&p2->out_edges, (node_t*)edge_out);
+					p2->out_num++;
+					edge_in->reverse = edge_out;
+					edge_out->reverse = edge_in;
+				} else {
+					p2 = (Point*)GetBorderPoint(isl->TrScid);
+					if (p2 == NULL) continue;
+					isl->endpoints[1] = p2;
+				}
+			} else {
+				edge_out = (EdgeList*)malloc(sizeof(EdgeList));
+				edge_out->edge = (Edge*)isl;
+				edge_out->flag = 0;
+				list_append((list*)&p2->out_edges, (node_t*)edge_out);
+				p2->out_num++;
+				edge_out->reverse = NULL;
+				p1 = (Point*)GetBorderPoint(isl->RvScid);
+				if (p1 == NULL) continue;
+				isl->endpoints[0] = p1;
+			}			
+			n++;
+		}
+		free(isl);
+		
+	}
+	
 	printf("读取数据成功，共读取%d条星间/星地单向链路数据\n", n);
 	return 0;
 }
@@ -1079,6 +1279,43 @@ void TimeUpdate(const GPSTIME* Time, SATNET* SatNet) {
 	DestroySpraseMatrix(Cov_Clk);
 	DestroySpraseMatrix(Cov_Orb);
 
+
+	// update all node
+	int n, type, rank;
+	SATINFO* p, *p_old;
+	for (rank = 0; rank < world_size; rank++) {
+		if (world_rank == rank) {
+			p = (SATINFO*)SatNet->points;
+			n = SatNet->points_num;
+		}
+		MPI_Bcast(&n, 1, MPI_INT, rank, MPI_COMM_WORLD);
+		for (i = 0; i < n; i++) {
+			if (world_rank == rank) {
+				p = (SATINFO*)p->next;
+				type = p->type;
+			} 
+			MPI_Bcast(&type, 1, MPI_INT, rank, MPI_COMM_WORLD);
+			if (type == 1) {
+				if (world_rank != rank) p = (SATINFO*)malloc(sizeof(SATINFO));
+				MPI_Bcast(p, sizeof(SATINFO), MPI_BYTE, rank, MPI_COMM_WORLD);
+				if (world_rank != rank) {
+					p_old = (SATINFO*)GetBorderPoint(p->id);
+					memcpy(p_old->Clk, p->Clk, sizeof(double) * 2);
+					memcpy(p_old->X, p->X, sizeof(double) * DIM);
+					memcpy(p_old->CovC, p->CovC, sizeof(double) * 4);
+					memcpy(p_old->CovX, p->CovX, sizeof(double) * DIM * DIM);
+					p_old->STM[0] = p->STM[0];
+					p_old->STM[1] = p->STM[1];
+					p_old->Valid = p->Valid;
+					p_old->Health = p->Health;
+					p_old->GapTime = p->GapTime;
+					free(p);
+				}
+
+			}
+		}
+	}
+
 	printf("完成时间更新\n");
 }
 
@@ -1148,78 +1385,104 @@ int GenDerPrObs(SATNET* SatNet) {
 	n = 0;
 
 	Point* node;
-	EdgeList *e_in, *e_out, *obs_el;
-	Edge *in_edge, *out_edge;
-	int flag;
-	
-	for (node = (Point*)SatNet->points->next; node != SatNet->points; node = (Point*)node->next) {
+	EdgeList *e_in, *e_in_t, *e_out, *e_out_t, *obs_el, *el;
+	ISLPROBS *in_edge, *out_edge;
+	int flag, req_flag;
+	int req_rank;
+	MPI_Status status;
+	int count;
+	int req_buff[2];
 
-		for (e_in = (EdgeList*)node->in_edges.next; e_in != &node->in_edges;) {
+	// if (world_rank == 0){
+	// 	p1 = (Point*)SatNet->points->next;
+	// 	for (e_in_t = (EdgeList*)p1->in_edges.next; e_in_t != &p1->in_edges; e_in_t = (EdgeList*)e_in_t->next){
+	// 		in_edge = (ISLPROBS*)e_in_t->edge;
+	// 		printf("process %d edge %d %d\n", world_rank, in_edge->RvScid, in_edge->TrScid);
+	// 	}
+	// }
+	for (node = (Point*)SatNet->points->next; node != SatNet->points; node = (Point*)node->next) {
+		
+		for (e_in_t = (EdgeList*)node->in_edges.next; e_in_t != &node->in_edges; ) {
+			e_in = e_in_t;
+			e_in_t = (EdgeList*)e_in_t->next;
 			if (e_in->flag == 1){
-				e_in = (EdgeList*)e_in->next;
 				continue;
 			} 
 
-			in_edge = e_in->edge;
+			in_edge = (ISLPROBS*)e_in->edge;
+			//printf("process %d in edge %d %d\n", world_rank, in_edge->RvScid, in_edge->TrScid);
 			flag = 0;
-			for (e_out = (EdgeList*)node->out_edges.next; e_out != &node->out_edges;) {
+			for (e_out_t = (EdgeList*)node->out_edges.next; e_out_t != &node->out_edges; ) {
+				e_out = e_out_t;
+				e_out_t = (EdgeList*)e_out_t->next;
 				if (e_out->flag == 1) {
-					e_out = (EdgeList*)e_out->next;
 					continue;
 				}
+				
+				out_edge = (ISLPROBS*)e_out->edge;
+				//printf("process %d out edge %d %d\n", world_rank, out_edge->RvScid, out_edge->TrScid);
+				if (out_edge->RvScid == in_edge->TrScid) {
+					if (e_in->reverse != NULL && e_out->reverse != NULL) {
+						if (e_in->reverse->flag == 1 && e_out->flag == 2) {
+							free(e_in->edge);
+							e_in->edge = e_in->reverse->edge;
+							e_in->flag = 1;
+							free(e_out->edge);
+							list_erase((list*)&node->out_edges, (node_t*)e_out);
+							node->out_num--;
+							flag = 1;
+							break;
+						}
+						if (e_in->flag == 2 && e_out->reverse->flag == 1) {
+							free(e_in->edge);
+							list_erase((list*)&node->in_edges, (node_t*)e_in);
+							node->in_num--;
+							free(e_out->edge);
+							e_out->edge = e_out->reverse->edge;
+							e_out->flag = 1;
+							flag = 1;
+							break;
+						}
 
-				out_edge = e_out->edge;
-				if (out_edge->endpoints[0] == in_edge->endpoints[1]) {
-
-					if (e_in->reverse->flag == 1 && e_out->flag == 2) {
-						free(e_in->edge);
-						e_in->edge = e_in->reverse->edge;
-						e_in->flag = 1;
-						e_in = (EdgeList*)e_in->next;
-						free(e_out->edge);
-						e_out = (EdgeList*)e_out->next;
-						list_erase((list*)&node->out_edges, ((node_t*)e_out)->prev);
-						node->out_num--;
-						flag = 1;
-						break;
-					}
-
-					if (e_in->flag == 2 && e_out->reverse->flag == 1) {
-						free(e_in->edge);
-						e_in = (EdgeList*)e_in->next;
-						list_erase((list*)&node->in_edges, ((node_t*)e_in)->prev);
-						node->in_num--;
-						free(e_out->edge);
-						e_out->edge = e_out->reverse->edge;
-						e_out->flag = 1;
-						e_out = (EdgeList*)e_out->next;
-						flag = 1;
-						break;
-					}
-
-
-					if (GetDifGPSTime(&((ISLPROBS*)in_edge)->RvLocTime, &((ISLPROBS*)out_edge)->RvLocTime) < 0) {
-						isl = (ISLPROBS*)in_edge;
-						reisl = (ISLPROBS*)out_edge;
-						obs_el = (EdgeList*)e_in;
-						e_in->flag = 1;
-						e_out->reverse->flag = 2;
-						e_in = (EdgeList*)e_in->next;
-						e_out = (EdgeList*)e_out->next;
-						list_erase((list*)&node->out_edges, ((node_t*)e_out)->prev);
-						node->out_num--;
-					}
+						if (GetDifGPSTime(&((ISLPROBS*)in_edge)->RvLocTime, &((ISLPROBS*)out_edge)->RvLocTime) < 0) {
+							isl = (ISLPROBS*)in_edge;
+							reisl = (ISLPROBS*)out_edge;
+							obs_el = (EdgeList*)e_in;
+							e_in->flag = 1;
+							e_out->reverse->flag = 2;
+							list_erase((list*)&node->out_edges, (node_t*)e_out);
+							node->out_num--;
+						}
+						else {
+							reisl = (ISLPROBS*)in_edge;
+							isl = (ISLPROBS*)out_edge;
+							obs_el = (EdgeList*)e_out;
+							e_out->flag = 1;
+							e_in->reverse->flag = 2;
+							list_erase((list*)&node->in_edges, (node_t*)e_in);
+							node->in_num--;
+						}
+						
+					} 
 					else {
-						reisl = (ISLPROBS*)in_edge;
-						isl = (ISLPROBS*)out_edge;
-						obs_el = (EdgeList*)e_out;
-						e_out->flag = 1;
-						e_in->reverse->flag = 2;
-						e_in = (EdgeList*)e_in->next;
-						e_out = (EdgeList*)e_out->next;
-						list_erase((list*)&node->in_edges, ((node_t*)e_in)->prev);
-						node->in_num--;
+						if (GetDifGPSTime(&((ISLPROBS*)in_edge)->RvLocTime, &((ISLPROBS*)out_edge)->RvLocTime) < 0) {
+							isl = in_edge;
+							reisl = out_edge;
+							obs_el = e_in;
+							e_in->flag = 1;
+							list_erase((list*)&node->out_edges, (node_t*)e_out);
+							node->out_num--;
+						}
+						else {
+							reisl = in_edge;
+							isl = out_edge;
+							obs_el = e_out;
+							e_out->flag = 1;
+							list_erase((list*)&node->in_edges, (node_t*)e_in);
+							node->in_num--;
+						}
 					}
+					
 					obs = (DEROBS*)malloc(sizeof(DEROBS));
 					obs->Scid1 = isl->RvScid;
 					obs->Scid2 = isl->TrScid;
@@ -1242,14 +1505,15 @@ int GenDerPrObs(SATNET* SatNet) {
 						continue;
 					}
 					flag = 1;
-					list_append((list*)EpkDerObs, (node_t*)obs);
+					// list_append((list*)EpkDerObs, (node_t*)obs);
+					
 					n++;
 					break;
 				}
-				e_out = (EdgeList*)e_out->next;
 			}
 			if (flag == 0) {
 				e_in->reverse->flag = 2;
+				if (world_rank==0)printf("here in %d %d\n",e_in->edge->endpoints[0]->index,e_in->edge->endpoints[1]->index);
 				free(e_in->edge);
 				e_in = (EdgeList*)e_in->next;
 				list_erase((list*)&node->in_edges, ((node_t*)e_in)->prev);
@@ -1258,12 +1522,12 @@ int GenDerPrObs(SATNET* SatNet) {
 		}
 
 		for (e_out = (EdgeList*)node->out_edges.next; e_out != &node->out_edges;) {
-			out_edge = e_out->edge;
 			if (e_out->flag == 0) {
 				e_out->reverse->flag = 2;
 				free(e_out->edge);
 				e_out = (EdgeList*)e_out->next;
 				list_erase((list*)&node->out_edges,(node_t*)e_out->prev);
+				printf("here out\n");
 				node->out_num--;
 			}
 			else e_out = (EdgeList*)e_out->next;
@@ -1449,7 +1713,7 @@ int GenDerObsPredict(DEROBS* derobs, ISLPROBS* isl1, ISLPROBS* isl2) {
 			derobs->P2RvState[j] = m_anchor_X_I[j];
 		}
 		Range2 = sqrt(VectDot(3, 3, dPos, dPos));
-       
+	
 		derobs->CConCorr = RelCorr[0] + RelCorr[1] - sat1->Tgd[0] + anc->Tgd[0];
 		derobs->ObsQua.dt[0] = dt[0] + dt[1];
 		derobs->ObsQua.dt[1] = 0.0;
@@ -1508,7 +1772,6 @@ int GenDerObsPredict(DEROBS* derobs, ISLPROBS* isl1, ISLPROBS* isl2) {
 		GT.SecOfWeek = derobs->T2.SecOfWeek - isl2->PRObs / C_Light - dT_Prn1[1];
 		ICRF_ITRF_GPST(MJD_J2000, &GT, 0, m_anchor_X_I, anc->Pos);
 
-		//trop[1] = hopfield(EpkDerObs->DerObsList[i].P2RvState,m_anchor_X_I);
 		trop[1] = 0;
 		Tgd[1] = anc->Tgd[0];
 		for (j = 0; j < 3; j++)
@@ -1826,79 +2089,79 @@ void WriteDerObsResidual(SATINFO* SatAtod)
 		fprintf(FDerOrb, "\n");
 	}
 
-	for (j = 0; j < AncNum; j++)
-	{
-		if (Anchor[j].Valid == false)  continue;
+	// for (j = 0; j < AncNum; j++)
+	// {
+	// 	if (Anchor[j].Valid == false)  continue;
 
-		fprintf(FPProc, "%12.5lf %2d C        0.0     0.0     0.0    1    0.0",
-			mjd.Days + mjd.FracDay, Anchor[j].StnId);
+	// 	fprintf(FPProc, "%12.5lf %2d C        0.0     0.0     0.0    1    0.0",
+	// 		mjd.Days + mjd.FracDay, Anchor[j].StnId);
 
-		//fprintf(FDerClk,"%12.5lf %2d C ",mjd.Days+mjd.FracDay,Anchor[j].StnId);
-		fprintf(FDerClk, "%4d %6.0lf %4d ", Time.Week, Time.SecOfWeek, Anchor[j].StnId);
-		for (el = (EdgeList*)Anchor[j].in_edges.next; el != &Anchor[j].in_edges; el = (EdgeList*)el->next) {
-			EpkDerObs = (DEROBS*)el->edge;
-			//n = (EpkDerObs->DerObsList[i].Scid1 == Anchor[j].StnId)? 0 : 1;
+	// 	//fprintf(FDerClk,"%12.5lf %2d C ",mjd.Days+mjd.FracDay,Anchor[j].StnId);
+	// 	fprintf(FDerClk, "%4d %6.0lf %4d ", Time.Week, Time.SecOfWeek, Anchor[j].StnId);
+	// 	for (el = (EdgeList*)Anchor[j].in_edges.next; el != &Anchor[j].in_edges; el = (EdgeList*)el->next) {
+	// 		EpkDerObs = (DEROBS*)el->edge;
+	// 		//n = (EpkDerObs->DerObsList[i].Scid1 == Anchor[j].StnId)? 0 : 1;
 
-			fprintf(FPProc, "%10.3lf %2d %2d %3d %3d",
-				EpkDerObs->ObsQua.ApriClkResid, EpkDerObs->ClkBlunder[0],
-				EpkDerObs->ClkBlunder[1], EpkDerObs->Valid,
-				((EpkDerObs->Scid1 == Anchor[j].StnId) ? EpkDerObs->Scid2 : EpkDerObs->Scid1));
+	// 		fprintf(FPProc, "%10.3lf %2d %2d %3d %3d",
+	// 			EpkDerObs->ObsQua.ApriClkResid, EpkDerObs->ClkBlunder[0],
+	// 			EpkDerObs->ClkBlunder[1], EpkDerObs->Valid,
+	// 			((EpkDerObs->Scid1 == Anchor[j].StnId) ? EpkDerObs->Scid2 : EpkDerObs->Scid1));
 
-			fprintf(FDerClk, "%4d %14.3lf %14.3lf %14.3lf %4d %4d %4d", ((EpkDerObs->Scid1 == Anchor[j].StnId) ? EpkDerObs->Scid2 : EpkDerObs->Scid1),
-				EpkDerObs->DerCObs, EpkDerObs->CCObs,
-				EpkDerObs->CConCorr, EpkDerObs->ClkBlunder[0], EpkDerObs->ClkBlunder[1],
-				EpkDerObs->Valid);
-		}
-		for (el = (EdgeList*)Anchor[j].out_edges.next; el != &Anchor[j].out_edges; el = (EdgeList*)el->next) {
-			EpkDerObs = (DEROBS*)el->edge;
-			//n = (EpkDerObs->DerObsList[i].Scid1 == Anchor[j].StnId)? 0 : 1;
+	// 		fprintf(FDerClk, "%4d %14.3lf %14.3lf %14.3lf %4d %4d %4d", ((EpkDerObs->Scid1 == Anchor[j].StnId) ? EpkDerObs->Scid2 : EpkDerObs->Scid1),
+	// 			EpkDerObs->DerCObs, EpkDerObs->CCObs,
+	// 			EpkDerObs->CConCorr, EpkDerObs->ClkBlunder[0], EpkDerObs->ClkBlunder[1],
+	// 			EpkDerObs->Valid);
+	// 	}
+	// 	for (el = (EdgeList*)Anchor[j].out_edges.next; el != &Anchor[j].out_edges; el = (EdgeList*)el->next) {
+	// 		EpkDerObs = (DEROBS*)el->edge;
+	// 		//n = (EpkDerObs->DerObsList[i].Scid1 == Anchor[j].StnId)? 0 : 1;
 
-			fprintf(FPProc, "%10.3lf %2d %2d %3d %3d",
-				EpkDerObs->ObsQua.ApriClkResid, EpkDerObs->ClkBlunder[0],
-				EpkDerObs->ClkBlunder[1], EpkDerObs->Valid,
-				((EpkDerObs->Scid1 == Anchor[j].StnId) ? EpkDerObs->Scid2 : EpkDerObs->Scid1));
+	// 		fprintf(FPProc, "%10.3lf %2d %2d %3d %3d",
+	// 			EpkDerObs->ObsQua.ApriClkResid, EpkDerObs->ClkBlunder[0],
+	// 			EpkDerObs->ClkBlunder[1], EpkDerObs->Valid,
+	// 			((EpkDerObs->Scid1 == Anchor[j].StnId) ? EpkDerObs->Scid2 : EpkDerObs->Scid1));
 
-			fprintf(FDerClk, "%4d %14.3lf %14.3lf %14.3lf %4d %4d %4d", ((EpkDerObs->Scid1 == Anchor[j].StnId) ? EpkDerObs->Scid2 : EpkDerObs->Scid1),
-				EpkDerObs->DerCObs, EpkDerObs->CCObs,
-				EpkDerObs->CConCorr, EpkDerObs->ClkBlunder[0], EpkDerObs->ClkBlunder[1],
-				EpkDerObs->Valid);
-		}
-		fprintf(FPProc, "\n");
-		fprintf(FDerClk, "\n");
+	// 		fprintf(FDerClk, "%4d %14.3lf %14.3lf %14.3lf %4d %4d %4d", ((EpkDerObs->Scid1 == Anchor[j].StnId) ? EpkDerObs->Scid2 : EpkDerObs->Scid1),
+	// 			EpkDerObs->DerCObs, EpkDerObs->CCObs,
+	// 			EpkDerObs->CConCorr, EpkDerObs->ClkBlunder[0], EpkDerObs->ClkBlunder[1],
+	// 			EpkDerObs->Valid);
+	// 	}
+	// 	fprintf(FPProc, "\n");
+	// 	fprintf(FDerClk, "\n");
 
-		fprintf(FPProc, "%12.5lf %2d O        0.0     0.0     0.0     1    0.0", mjd.Days + mjd.FracDay, Anchor[j].StnId);
+	// 	fprintf(FPProc, "%12.5lf %2d O        0.0     0.0     0.0     1    0.0", mjd.Days + mjd.FracDay, Anchor[j].StnId);
 
-		//fprintf(FDerOrb,"%10.3f %2d ",mjd.Days+mjd.FracDay,Anchor[j].StnId);
-		fprintf(FDerOrb, "%4d %6.0lf %4d ", Time.Week, Time.SecOfWeek, Anchor[j].StnId);
-		for (el = (EdgeList*)Anchor[j].in_edges.next; el != &Anchor[j].in_edges; el = (EdgeList*)el->next) {
-			EpkDerObs = (DEROBS*)el->edge;
-			//n = (EpkDerObs->DerObsList[i].Scid1 == Anchor[j].StnId)? 0 : 1;
-			fprintf(FPProc, "%10.3lf %2d %2d %3d %3d",
-				EpkDerObs->ObsQua.ApriOrbResid, EpkDerObs->OrbBlunder[0],
-				EpkDerObs->OrbBlunder[1], EpkDerObs->Valid,
-				((EpkDerObs->Scid1 == Anchor[j].StnId) ? EpkDerObs->Scid2 : EpkDerObs->Scid1));
-			fprintf(FDerOrb, "%4d %14.3lf %14.3lf %14.3lf %4d %4d %4d",
-				((EpkDerObs->Scid1 == Anchor[j].StnId) ? EpkDerObs->Scid2 : EpkDerObs->Scid1),
-				EpkDerObs->DerANObs, EpkDerObs->CANObs,
-				EpkDerObs->AConCorr, EpkDerObs->OrbBlunder[0],
-				EpkDerObs->OrbBlunder[1], EpkDerObs->Valid);
-		}
-		for (el = (EdgeList*)Anchor[j].out_edges.next; el != &Anchor[j].out_edges; el = (EdgeList*)el->next) {
-			EpkDerObs = (DEROBS*)el->edge;
-			//n = (EpkDerObs->DerObsList[i].Scid1 == Anchor[j].StnId)? 0 : 1;
-			fprintf(FPProc, "%10.3lf %2d %2d %3d %3d",
-				EpkDerObs->ObsQua.ApriOrbResid, EpkDerObs->OrbBlunder[0],
-				EpkDerObs->OrbBlunder[1], EpkDerObs->Valid,
-				((EpkDerObs->Scid1 == Anchor[j].StnId) ? EpkDerObs->Scid2 : EpkDerObs->Scid1));
-			fprintf(FDerOrb, "%4d %14.3lf %14.3lf %14.3lf %4d %4d %4d",
-				((EpkDerObs->Scid1 == Anchor[j].StnId) ? EpkDerObs->Scid2 : EpkDerObs->Scid1),
-				EpkDerObs->DerANObs, EpkDerObs->CANObs,
-				EpkDerObs->AConCorr, EpkDerObs->OrbBlunder[0],
-				EpkDerObs->OrbBlunder[1], EpkDerObs->Valid);
-		}
-		fprintf(FPProc, "\n");
-		fprintf(FDerOrb, "\n");
-	}
+	// 	//fprintf(FDerOrb,"%10.3f %2d ",mjd.Days+mjd.FracDay,Anchor[j].StnId);
+	// 	fprintf(FDerOrb, "%4d %6.0lf %4d ", Time.Week, Time.SecOfWeek, Anchor[j].StnId);
+	// 	for (el = (EdgeList*)Anchor[j].in_edges.next; el != &Anchor[j].in_edges; el = (EdgeList*)el->next) {
+	// 		EpkDerObs = (DEROBS*)el->edge;
+	// 		//n = (EpkDerObs->DerObsList[i].Scid1 == Anchor[j].StnId)? 0 : 1;
+	// 		fprintf(FPProc, "%10.3lf %2d %2d %3d %3d",
+	// 			EpkDerObs->ObsQua.ApriOrbResid, EpkDerObs->OrbBlunder[0],
+	// 			EpkDerObs->OrbBlunder[1], EpkDerObs->Valid,
+	// 			((EpkDerObs->Scid1 == Anchor[j].StnId) ? EpkDerObs->Scid2 : EpkDerObs->Scid1));
+	// 		fprintf(FDerOrb, "%4d %14.3lf %14.3lf %14.3lf %4d %4d %4d",
+	// 			((EpkDerObs->Scid1 == Anchor[j].StnId) ? EpkDerObs->Scid2 : EpkDerObs->Scid1),
+	// 			EpkDerObs->DerANObs, EpkDerObs->CANObs,
+	// 			EpkDerObs->AConCorr, EpkDerObs->OrbBlunder[0],
+	// 			EpkDerObs->OrbBlunder[1], EpkDerObs->Valid);
+	// 	}
+	// 	for (el = (EdgeList*)Anchor[j].out_edges.next; el != &Anchor[j].out_edges; el = (EdgeList*)el->next) {
+	// 		EpkDerObs = (DEROBS*)el->edge;
+	// 		//n = (EpkDerObs->DerObsList[i].Scid1 == Anchor[j].StnId)? 0 : 1;
+	// 		fprintf(FPProc, "%10.3lf %2d %2d %3d %3d",
+	// 			EpkDerObs->ObsQua.ApriOrbResid, EpkDerObs->OrbBlunder[0],
+	// 			EpkDerObs->OrbBlunder[1], EpkDerObs->Valid,
+	// 			((EpkDerObs->Scid1 == Anchor[j].StnId) ? EpkDerObs->Scid2 : EpkDerObs->Scid1));
+	// 		fprintf(FDerOrb, "%4d %14.3lf %14.3lf %14.3lf %4d %4d %4d",
+	// 			((EpkDerObs->Scid1 == Anchor[j].StnId) ? EpkDerObs->Scid2 : EpkDerObs->Scid1),
+	// 			EpkDerObs->DerANObs, EpkDerObs->CANObs,
+	// 			EpkDerObs->AConCorr, EpkDerObs->OrbBlunder[0],
+	// 			EpkDerObs->OrbBlunder[1], EpkDerObs->Valid);
+	// 	}
+	// 	fprintf(FPProc, "\n");
+	// 	fprintf(FDerOrb, "\n");
+	// }
 	fprintf(FDerOrb, "--------------------------------------------------\n");
 	fprintf(FDerClk, "--------------------------------------------------\n");
 
@@ -2146,7 +2409,9 @@ void ClkMeasUpdate(SATNET* SatNet) {
 			for (el = (EdgeList*)anc->in_edges.next; el != &anc->in_edges; el = (EdgeList*)el->next) {
 				derobs = (DEROBS*)el->edge;
 				if (derobs->Valid < 1)  continue;
-				sat = (SATINFO*)derobs->endpoints[1];
+				//sat = (SATINFO*)derobs->endpoints[1];
+				sat = (SATINFO*)GetPoint(derobs->Scid2);
+				if (sat == NULL) continue;
 				if (sat->type != 1 || sat->Valid <= NOINIT || sat->Health == 0) continue;
 				EmptySpraseMatrix(H);
 				O_C = derobs->DerCObs - derobs->CCObs - derobs->CConCorr
@@ -2181,7 +2446,9 @@ void ClkMeasUpdate(SATNET* SatNet) {
 				if (derobs->Valid < 1)  continue;
 				if (derobs->endpoints[1]->type == 1) {
 					EmptySpraseMatrix(H);
-					sat2 = (SATINFO*)derobs->endpoints[1];
+					//sat2 = (SATINFO*)derobs->endpoints[1];
+					sat2 = (SATINFO*)GetPoint(derobs->Scid2);
+					if (sat2 == NULL) continue;
 					if (sat2->Valid <= NOINIT || sat2->Health == 0)    continue;
 					O_C = derobs->DerCObs - derobs->CCObs - derobs->CConCorr
 						- (2.0 * AllSatCov->Clk[sat1->index * 2] + AllSatCov->Clk[sat1->index * 2 + 1] * derobs->ObsQua.dt[0]) * C_Light
@@ -2442,68 +2709,128 @@ void ANSMeasUpdate(SATNET* SatNet) {
 				derobs = (DEROBS*)el->edge;
 				if (derobs->Valid < 1)  continue;
 				if (derobs->endpoints[1]->type == 1) {
-					sat2 = (SATINFO*)derobs->endpoints[1];
-					if (sat2->Valid <= NOINIT || sat2->Health == 0 || sat2->in_num + sat2->out_num < 2)    continue;
-					memset(dPos, 0, DIM * sizeof(double));
-					
-					EmptySpraseMatrix(H);
+					//sat2 = (SATINFO*)derobs->endpoints[1];
+					sat2 = (SATINFO*)GetPoint(derobs->Scid2);
+					if (sat2 == NULL) {
+						sat2 = (SATINFO*)derobs->endpoints[1];
+						if (sat2->Valid <= NOINIT || sat2->Health == 0 || sat2->in_num + sat2->out_num < 2)    continue;
+						memset(dPos, 0, DIM * sizeof(double));
+						EmptySpraseMatrix(H);
 
-					MatrixMultiply(DIM, DIM, DIM, 1, derobs->P1RvState + 6, AllSatCov->Orb + sat1->index * DIM, X1);
-					MatrixMultiply(DIM, DIM, DIM, 1, derobs->P1TrState + 6, AllSatCov->Orb + sat1->index * DIM, X2);
-					MatrixMultiply(DIM, DIM, DIM, 1, derobs->P2RvState + 6, AllSatCov->Orb + sat2->index * DIM, X3);
-					MatrixMultiply(DIM, DIM, DIM, 1, derobs->P2TrState + 6, AllSatCov->Orb + sat2->index * DIM, X4);
+						MatrixMultiply(DIM, DIM, DIM, 1, derobs->P1RvState + 6, AllSatCov->Orb + sat1->index * DIM, X1);
+						MatrixMultiply(DIM, DIM, DIM, 1, derobs->P1TrState + 6, AllSatCov->Orb + sat1->index * DIM, X2);
+						MatrixMultiply(DIM, DIM, DIM, 1, derobs->P2RvState + 6, AllSatCov->Orb + sat2->index * DIM, X3);
+						MatrixMultiply(DIM, DIM, DIM, 1, derobs->P2TrState + 6, AllSatCov->Orb + sat2->index * DIM, X4);
 
-					MatrixAddition2(1, DIM, derobs->P1RvState, X1);    // X1=X1+Phi*dX
-					MatrixAddition2(1, DIM, derobs->P1TrState, X2);
-					MatrixAddition2(1, DIM, derobs->P2RvState, X3);    // X1=X1+Phi*dX
-					MatrixAddition2(1, DIM, derobs->P2TrState, X4);
-					for (j = 0; j < 3; j++)      dPos[j] = X1[j] - X4[j];
-					Range1 = sqrt(VectDot(3, 3, dPos, dPos));
-					for (j = 0; j < 3; j++)      dPos[j] = dPos[j] / Range1;
-					MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P1RvState + 6, H1);
-					for (j = 0; j < 3; j++)      dPos[j] = -1.0 * dPos[j];
-					MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P2TrState + 6, H4);
+						MatrixAddition2(1, DIM, derobs->P1RvState, X1);    // X1=X1+Phi*dX
+						MatrixAddition2(1, DIM, derobs->P1TrState, X2);
+						MatrixAddition2(1, DIM, derobs->P2RvState, X3);    // X1=X1+Phi*dX
+						MatrixAddition2(1, DIM, derobs->P2TrState, X4);
+						for (j = 0; j < 3; j++)      dPos[j] = X1[j] - X4[j];
+						Range1 = sqrt(VectDot(3, 3, dPos, dPos));
+						for (j = 0; j < 3; j++)      dPos[j] = dPos[j] / Range1;
+						MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P1RvState + 6, H1);
 
-					for (j = 0; j < 3; j++)      dPos[j] = X2[j] - X3[j];
-					Range2 = sqrt(VectDot(3, 3, dPos, dPos));
-					for (j = 0; j < 3; j++)      dPos[j] = dPos[j] / Range2;
-					MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P1TrState + 6, H2);
-					for (j = 0; j < 3; j++)      dPos[j] = -1.0 * dPos[j];
-					MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P2RvState + 6, H3);
+						for (j = 0; j < 3; j++)      dPos[j] = X2[j] - X3[j];
+						Range2 = sqrt(VectDot(3, 3, dPos, dPos));
+						for (j = 0; j < 3; j++)      dPos[j] = dPos[j] / Range2;
+						MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P1TrState + 6, H2);
 
-					for (j = 0; j < DIM; j++) {
-						H_[j] = H1[j] + H2[j];
-					}
-					CopySubSpraseMatrix(H, sat1->index, 0, DIM, 1, H_);
-					for (j = 0; j < DIM; j++) {
-						H_[j] = H3[j] + H4[j];
-					}
-					CopySubSpraseMatrix(H, sat2->index, 0, DIM, 1, H_);
+						for (j = 0; j < DIM; j++) {
+							H_[j] = H1[j] + H2[j];
+						}
+						CopySubSpraseMatrix(H, sat1->index, 0, DIM, 1, H_);
 
-					O_C = derobs->DerANObs - Range1 - Range2 - derobs->AConCorr;
-					R = NoiseOfISL * NoiseOfISL;
+						O_C = derobs->DerANObs - Range1 - Range2 - derobs->AConCorr;
+						R = NoiseOfISL * NoiseOfISL;
 
-					if (ScalarMeasUpdate(O_C, R, H, derobs->Valid, DIM, AllSatCov->Orb, AllSatCov->OrbCov)) {
-						//sat1->TotalSatNum++;
-						//sat2->TotalSatNum++;
-						//if (derobs->Valid != 3)
-						//{
-						//	sat1->ValidSatNum++;
-						//	sat1->ValidSatNum++;
-						//}
+						if (ScalarMeasUpdate(O_C, R, H, derobs->Valid, DIM, AllSatCov->Orb, AllSatCov->OrbCov)) {
+							//sat1->TotalSatNum++;
+							//sat2->TotalSatNum++;
+							//if (derobs->Valid != 3)
+							//{
+							//	sat1->ValidSatNum++;
+							//	sat1->ValidSatNum++;
+							//}
+						}
+						else {
+							derobs->Valid = -1;
+
+							printf("Orbit MeasUpdate fail: SCID %2d %6d %10.1f %10.2f %8.2f  Ref SCID: %2d\n",
+								sat1->id, sat1->TOE.Week,
+								sat1->TOE.SecOfWeek, O_C,
+								R, sat2->id);
+
+							fprintf(FPLOG, "Orbit MeasUpdate fail: SCID %2d %6d %10.1f %10.2f %8.2f  Ref SCID: %2d\n",
+								sat1->id, sat1->TOE.Week,
+								sat1->TOE.SecOfWeek, O_C,
+								R, sat2->id);
+						}
+
 					}
 					else {
-						derobs->Valid = -1;
+						if (sat2->Valid <= NOINIT || sat2->Health == 0 || sat2->in_num + sat2->out_num < 2)    continue;
+						memset(dPos, 0, DIM * sizeof(double));
+						
+						EmptySpraseMatrix(H);
 
-						printf("Orbit MeasUpdate fail: SCID %2d %6d %10.1f %10.2f %8.2f  Ref SCID: %2d\n",
-							sat1->id, sat1->TOE.Week,
-							sat1->TOE.SecOfWeek, O_C,
-							R, sat2->id);
+						MatrixMultiply(DIM, DIM, DIM, 1, derobs->P1RvState + 6, AllSatCov->Orb + sat1->index * DIM, X1);
+						MatrixMultiply(DIM, DIM, DIM, 1, derobs->P1TrState + 6, AllSatCov->Orb + sat1->index * DIM, X2);
+						MatrixMultiply(DIM, DIM, DIM, 1, derobs->P2RvState + 6, AllSatCov->Orb + sat2->index * DIM, X3);
+						MatrixMultiply(DIM, DIM, DIM, 1, derobs->P2TrState + 6, AllSatCov->Orb + sat2->index * DIM, X4);
 
-						fprintf(FPLOG, "Orbit MeasUpdate fail: SCID %2d %6d %10.1f %10.2f %8.2f  Ref SCID: %2d\n",
-							sat1->id, sat1->TOE.Week,
-							sat1->TOE.SecOfWeek, O_C,
-							R, sat2->id);
+						MatrixAddition2(1, DIM, derobs->P1RvState, X1);    // X1=X1+Phi*dX
+						MatrixAddition2(1, DIM, derobs->P1TrState, X2);
+						MatrixAddition2(1, DIM, derobs->P2RvState, X3);    // X1=X1+Phi*dX
+						MatrixAddition2(1, DIM, derobs->P2TrState, X4);
+						for (j = 0; j < 3; j++)      dPos[j] = X1[j] - X4[j];
+						Range1 = sqrt(VectDot(3, 3, dPos, dPos));
+						for (j = 0; j < 3; j++)      dPos[j] = dPos[j] / Range1;
+						MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P1RvState + 6, H1);
+						for (j = 0; j < 3; j++)      dPos[j] = -1.0 * dPos[j];
+						MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P2TrState + 6, H4);
+
+						for (j = 0; j < 3; j++)      dPos[j] = X2[j] - X3[j];
+						Range2 = sqrt(VectDot(3, 3, dPos, dPos));
+						for (j = 0; j < 3; j++)      dPos[j] = dPos[j] / Range2;
+						MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P1TrState + 6, H2);
+						for (j = 0; j < 3; j++)      dPos[j] = -1.0 * dPos[j];
+						MatrixMultiply(1, DIM, DIM, DIM, dPos, derobs->P2RvState + 6, H3);
+
+						for (j = 0; j < DIM; j++) {
+							H_[j] = H1[j] + H2[j];
+						}
+						CopySubSpraseMatrix(H, sat1->index, 0, DIM, 1, H_);
+						for (j = 0; j < DIM; j++) {
+							H_[j] = H3[j] + H4[j];
+						}
+						CopySubSpraseMatrix(H, sat2->index, 0, DIM, 1, H_);
+
+						O_C = derobs->DerANObs - Range1 - Range2 - derobs->AConCorr;
+						R = NoiseOfISL * NoiseOfISL;
+
+						if (ScalarMeasUpdate(O_C, R, H, derobs->Valid, DIM, AllSatCov->Orb, AllSatCov->OrbCov)) {
+							//sat1->TotalSatNum++;
+							//sat2->TotalSatNum++;
+							//if (derobs->Valid != 3)
+							//{
+							//	sat1->ValidSatNum++;
+							//	sat1->ValidSatNum++;
+							//}
+						}
+						else {
+							derobs->Valid = -1;
+
+							printf("Orbit MeasUpdate fail: SCID %2d %6d %10.1f %10.2f %8.2f  Ref SCID: %2d\n",
+								sat1->id, sat1->TOE.Week,
+								sat1->TOE.SecOfWeek, O_C,
+								R, sat2->id);
+
+							fprintf(FPLOG, "Orbit MeasUpdate fail: SCID %2d %6d %10.1f %10.2f %8.2f  Ref SCID: %2d\n",
+								sat1->id, sat1->TOE.Week,
+								sat1->TOE.SecOfWeek, O_C,
+								R, sat2->id);
+						}
 					}
 				}
 				else continue;
@@ -2514,8 +2841,10 @@ void ANSMeasUpdate(SATNET* SatNet) {
 			if (anc->RefClkFlag != 1)  continue;
 			for (el = (EdgeList*)anc->in_edges.next; el != &anc->in_edges; el = (EdgeList*)el->next) {
 				derobs = (DEROBS*)el->edge;
-				if (derobs->Valid < 1)  continue;
+				//if (derobs->Valid < 1)  continue;
 				sat = (SATINFO*)derobs->endpoints[1];
+				sat = (SATINFO*)GetPoint(derobs->Scid2);
+				if (sat == NULL) continue;
 				if (sat->type != 1 || sat->Valid <= NOINIT || sat->Health == 0 || sat->in_num + sat->out_num < 2) continue;
 				memset(dPos, 0, DIM * sizeof(double));
 

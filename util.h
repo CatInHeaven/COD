@@ -41,7 +41,8 @@ struct EdgeList {
 	EdgeList in_edges; \
 	EdgeList out_edges; \
 	int	in_num; \
-	int out_num
+	int out_num; \
+	int rank
 
 #define EDGE_STRUCT \
 	LIST_STRUCT; \
@@ -49,6 +50,7 @@ struct EdgeList {
 
 #define GRAPH_STRUCT \
 	Point* points; \
+	Point* border_points; \
 	Edge* edges; \
 	int points_num
 
@@ -68,6 +70,7 @@ typedef struct Graph {
 
 void points_init(Point* points);
 void point_append(Graph* graph, Point* point);
+void border_point_append(Graph* graph, Point* point);
 void edges_init(Edge* edges);
 void graph_init(Graph* graph);
 void points_destroy(Point* points);
